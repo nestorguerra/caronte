@@ -1,0 +1,1738 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caronte · Tu yo futuro te escribe</title>
+    <meta name="description"
+        content="Responde 40 preguntas y recibe un libro único, escrito desde tu yo de dentro de 25 años. Literatura personalizada con IA.">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Caronte · Tu yo futuro te escribe">
+    <meta property="og:description" content="Un libro de 100 páginas escrito solo para ti, desde tu propio futuro.">
+    <meta property="og:type" content="website">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            --black-deep: #0A0A0B;
+            --gray-dark: #1A1A1D;
+            --gray-mid: #2D2D32;
+            --gray-text: #A0A0A8;
+            --white-warm: #F5F5F3;
+            --gold: #C9A962;
+            --gold-hover: #D4B978;
+            --gold-dim: rgba(201, 169, 98, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            background-color: var(--black-deep);
+            color: var(--white-warm);
+            line-height: 1.7;
+            font-size: 19px;
+            overflow-x: hidden;
+        }
+
+        /* Typography */
+        h1,
+        h2,
+        h3,
+        h4 {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-weight: 500;
+            line-height: 1.2;
+        }
+
+        /* Utility */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        .text-gold {
+            color: var(--gold);
+        }
+
+        .text-gray {
+            color: var(--gray-text);
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translateY(0) rotate(-2deg);
+            }
+
+            50% {
+                transform: translateY(-10px) rotate(-2deg);
+            }
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 0.4;
+            }
+
+            50% {
+                opacity: 0.8;
+            }
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: -200% 0;
+            }
+
+            100% {
+                background-position: 200% 0;
+            }
+        }
+
+        .animate-fade-in-up {
+            animation: fadeInUp 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+            opacity: 0;
+        }
+
+        .delay-1 {
+            animation-delay: 0.1s;
+        }
+
+        .delay-2 {
+            animation-delay: 0.2s;
+        }
+
+        .delay-3 {
+            animation-delay: 0.3s;
+        }
+
+        .delay-4 {
+            animation-delay: 0.4s;
+        }
+
+        .delay-5 {
+            animation-delay: 0.5s;
+        }
+
+        .delay-6 {
+            animation-delay: 0.6s;
+        }
+
+        /* Noise texture overlay */
+        .noise-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0.03;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+        }
+
+        /* ==================== HEADER ==================== */
+        header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            padding: 24px 0;
+            background: linear-gradient(to bottom, var(--black-deep), transparent);
+            transition: all 0.3s ease;
+        }
+
+        header.scrolled {
+            background: rgba(10, 10, 11, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 16px 0;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-family: 'Playfair Display', serif;
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            color: var(--white-warm);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .logo:hover {
+            color: var(--gold);
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 24px;
+            align-items: center;
+        }
+
+        .nav-link {
+            color: var(--white-warm);
+            text-decoration: none;
+            font-family: 'Cormorant Garamond', serif;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 15px;
+            letter-spacing: 0.05em;
+            transition: all 0.3s ease;
+        }
+
+        .nav-link:hover {
+            color: var(--gold);
+        }
+
+        .header-cta {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            padding: 12px 28px;
+            background: transparent;
+            border: 1px solid var(--gold);
+            color: var(--gold);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .header-cta:hover {
+            background: var(--gold);
+            color: var(--black-deep);
+        }
+
+        /* ==================== HERO ==================== */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 120px 24px 80px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(ellipse at 50% 0%, rgba(201, 169, 98, 0.08) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        .hero-decorative {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 600px;
+            height: 600px;
+            border: 1px solid var(--gray-mid);
+            border-radius: 50%;
+            opacity: 0.3;
+            animation: pulse 4s ease-in-out infinite;
+        }
+
+        .hero-decorative::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 400px;
+            height: 400px;
+            border: 1px solid var(--gray-mid);
+            border-radius: 50%;
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            max-width: 800px;
+        }
+
+        .hero-eyebrow {
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            color: var(--gold);
+            margin-bottom: 32px;
+        }
+
+        .hero h1 {
+            font-size: clamp(40px, 7vw, 72px);
+            font-weight: 500;
+            margin-bottom: 28px;
+            letter-spacing: -0.02em;
+        }
+
+        .hero h1 em {
+            font-style: italic;
+            color: var(--gold);
+        }
+
+        .hero-subtitle {
+            font-size: clamp(20px, 3vw, 26px);
+            color: var(--gray-text);
+            margin-bottom: 48px;
+            font-style: italic;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .hero-cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            padding: 20px 48px;
+            background: var(--gold);
+            border: none;
+            color: var(--black-deep);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+        }
+
+        .hero-cta:hover {
+            background: var(--gold-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(201, 169, 98, 0.3);
+        }
+
+        .hero-meta {
+            margin-top: 32px;
+            font-size: 15px;
+            color: var(--gray-text);
+            letter-spacing: 0.05em;
+        }
+
+        .hero-meta span {
+            margin: 0 12px;
+            opacity: 0.5;
+        }
+
+        .scroll-indicator {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            color: var(--gray-text);
+            font-size: 13px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            animation: fadeIn 1s ease 1.5s forwards;
+            opacity: 0;
+        }
+
+        .scroll-indicator::after {
+            content: '';
+            width: 1px;
+            height: 40px;
+            background: linear-gradient(to bottom, var(--gold), transparent);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        /* Prevent overlap on short screens (e.g. iPad landscape) */
+        @media (max-height: 750px) {
+            .scroll-indicator {
+                display: none;
+            }
+        }
+
+
+        /* ==================== SECTIONS ==================== */
+        section {
+            padding: 120px 0;
+            position: relative;
+        }
+
+        .section-label {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            color: var(--gold);
+            margin-bottom: 24px;
+            display: block;
+        }
+
+        .section-title {
+            font-size: clamp(32px, 5vw, 48px);
+            margin-bottom: 24px;
+        }
+
+        .section-subtitle {
+            font-size: 22px;
+            color: var(--gray-text);
+            font-style: italic;
+            max-width: 600px;
+        }
+
+        /* ==================== CONCEPTO ==================== */
+        .concepto {
+            background: linear-gradient(to bottom, var(--black-deep), var(--gray-dark), var(--black-deep));
+        }
+
+        .concepto-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 80px;
+            align-items: center;
+        }
+
+        .concepto-text p {
+            font-size: 20px;
+            margin-bottom: 24px;
+            color: var(--gray-text);
+        }
+
+        .concepto-text p:first-of-type {
+            font-size: 24px;
+            color: var(--white-warm);
+        }
+
+        .concepto-visual {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .book-realistic {
+            position: relative;
+            width: 500px;
+            /* Adjust based on image aspect ratio, assumed ~2:3 */
+            aspect-ratio: 2/3;
+            filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.6));
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .book-bg-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        /* Responsive text removed as image contains text now */
+
+        /* ==================== CÓMO FUNCIONA ==================== */
+        .como-funciona {
+            background: var(--black-deep);
+        }
+
+        .steps-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 48px;
+            margin-top: 80px;
+        }
+
+        .step {
+            padding: 48px 40px;
+            background: var(--gray-dark);
+            border: 1px solid var(--gray-mid);
+            position: relative;
+            transition: all 0.4s ease;
+        }
+
+        .step:hover {
+            border-color: var(--gold);
+            transform: translateY(-4px);
+        }
+
+        .step-number {
+            position: absolute;
+            top: -20px;
+            left: 40px;
+            font-family: 'Playfair Display', serif;
+            font-size: 64px;
+            font-weight: 600;
+            color: var(--gold);
+            opacity: 0.3;
+            line-height: 1;
+        }
+
+        .step h3 {
+            font-size: 28px;
+            margin-bottom: 20px;
+            margin-top: 24px;
+        }
+
+        .step p {
+            color: var(--gray-text);
+            font-size: 18px;
+        }
+
+        /* ==================== CAPÍTULOS ==================== */
+        .capitulos {
+            background: linear-gradient(to bottom, var(--black-deep), var(--gray-dark));
+        }
+
+        .capitulos-header {
+            text-align: center;
+            max-width: 700px;
+            margin: 0 auto 80px;
+        }
+
+        .chapters-list {
+            display: grid;
+            gap: 2px;
+            background: var(--gray-mid);
+            border: 1px solid var(--gray-mid);
+        }
+
+        .chapter {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 32px;
+            padding: 32px 40px;
+            background: var(--gray-dark);
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .chapter:hover {
+            background: rgba(201, 169, 98, 0.05);
+        }
+
+        .chapter-num {
+            font-family: 'Playfair Display', serif;
+            font-size: 14px;
+            color: var(--gold);
+            font-weight: 500;
+            letter-spacing: 0.1em;
+            width: 120px;
+            white-space: nowrap;
+        }
+
+        .chapter-content h4 {
+            font-size: 22px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .chapter-content p {
+            color: var(--gray-text);
+            font-size: 17px;
+        }
+
+        /* ==================== EJEMPLO ==================== */
+        .ejemplo {
+            background: var(--gray-dark);
+            overflow: hidden;
+        }
+
+        .ejemplo-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 80px;
+            align-items: center;
+        }
+
+        .page-mockup {
+            background: #f8f7f4;
+            color: #1a1a1a;
+            padding: 60px 50px;
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            font-size: 17px;
+            line-height: 1.9;
+            position: relative;
+            box-shadow:
+                0 25px 80px rgba(0, 0, 0, 0.4),
+                0 0 0 1px rgba(0, 0, 0, 0.1);
+            transform: rotate(1deg);
+            max-width: 480px;
+        }
+
+        .page-mockup::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 60px;
+            background: linear-gradient(to right, rgba(0, 0, 0, 0.05), transparent);
+        }
+
+        .page-mockup p {
+            margin-bottom: 20px;
+            text-indent: 2em;
+        }
+
+        .page-mockup p:first-child {
+            text-indent: 0;
+        }
+
+        .page-mockup em {
+            font-style: italic;
+        }
+
+        .page-number {
+            position: absolute;
+            bottom: 30px;
+            right: 50px;
+            font-size: 14px;
+            color: #999;
+        }
+
+        .ejemplo-note {
+            margin-top: 40px;
+            padding: 24px;
+            border-left: 2px solid var(--gold);
+            background: rgba(201, 169, 98, 0.05);
+        }
+
+        .ejemplo-note p {
+            font-size: 16px;
+            color: var(--gray-text);
+            font-style: italic;
+        }
+
+        /* ==================== PARA QUIÉN ==================== */
+        .para-quien {
+            background: var(--black-deep);
+        }
+
+        .para-quien-grid {
+            margin-top: 60px;
+            /* Changed to grid cards */
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+        }
+
+        .para-quien-list {
+            display: contents;
+            /* Allow Li items to be grid children */
+            list-style: none;
+        }
+
+        .para-quien-list li {
+            background: var(--gray-dark);
+            border: 1px solid var(--gray-mid);
+            padding: 40px 32px;
+            font-size: 18px;
+            line-height: 1.6;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .para-quien-list li:hover {
+            border-color: var(--gold);
+            transform: translateY(-4px);
+            background: linear-gradient(to bottom, var(--gray-dark), #1F1F22);
+        }
+
+        .para-quien-list li::before {
+            content: '✦';
+            /* Premium diamond symbol */
+            color: var(--gold);
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        /* Removed old disclaimer box styles as it was unused/hidden */
+
+        .disclaimer-box h4 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: var(--gold);
+        }
+
+        .disclaimer-box p {
+            color: var(--gray-text);
+            font-size: 17px;
+            line-height: 1.6;
+        }
+
+        /* ==================== PRECIO ==================== */
+        .precio {
+            background: linear-gradient(to bottom, var(--black-deep), var(--gray-dark));
+            text-align: center;
+        }
+
+        .precio-box {
+            max-width: 600px;
+            margin: 60px auto 0;
+            padding: 60px;
+            background: var(--gray-dark);
+            border: 1px solid var(--gold);
+            position: relative;
+        }
+
+        .precio-box::before {
+            content: '';
+            position: absolute;
+            top: -1px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100px;
+            height: 3px;
+            background: var(--gold);
+        }
+
+        .precio-amount {
+            font-family: 'Playfair Display', serif;
+            font-size: 72px;
+            font-weight: 600;
+            color: var(--white-warm);
+            margin-bottom: 8px;
+        }
+
+        .precio-amount span {
+            font-size: 32px;
+            vertical-align: super;
+        }
+
+        .precio-desc {
+            font-size: 20px;
+            color: var(--gray-text);
+            margin-bottom: 40px;
+        }
+
+        .precio-features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            text-align: left;
+            margin-bottom: 40px;
+        }
+
+        .precio-feature {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 16px;
+            color: var(--gray-text);
+        }
+
+        .precio-feature svg {
+            width: 20px;
+            height: 20px;
+            color: var(--gold);
+            flex-shrink: 0;
+        }
+
+        /* ==================== WAITING LIST ==================== */
+        .waiting-list {
+            background: var(--black-deep);
+            padding: 160px 0;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .waiting-list::before {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 400px;
+            background: radial-gradient(ellipse at 50% 100%, rgba(201, 169, 98, 0.1) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .waiting-list-content {
+            position: relative;
+            z-index: 1;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .waiting-list h2 {
+            font-size: clamp(36px, 5vw, 56px);
+            margin-bottom: 24px;
+        }
+
+        .waiting-list-subtitle {
+            font-size: 22px;
+            color: var(--gray-text);
+            margin-bottom: 48px;
+            font-style: italic;
+        }
+
+        .form-container {
+            display: flex;
+            gap: 16px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .form-container input {
+            flex: 1;
+            padding: 20px 24px;
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 18px;
+            background: var(--gray-dark);
+            border: 1px solid var(--gray-mid);
+            color: var(--white-warm);
+            outline: none;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-container input::placeholder {
+            color: var(--gray-text);
+        }
+
+        .form-container input:focus {
+            border-color: var(--gold);
+        }
+
+        .form-container button {
+            padding: 20px 36px;
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            background: var(--gold);
+            border: none;
+            color: var(--black-deep);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .form-container button:hover {
+            background: var(--gold-hover);
+        }
+
+        .form-note {
+            margin-top: 20px;
+            font-size: 14px;
+            color: var(--gray-text);
+        }
+
+        .social-proof {
+            margin-top: 48px;
+            padding-top: 48px;
+            border-top: 1px solid var(--gray-mid);
+        }
+
+        .social-proof-number {
+            font-family: 'Playfair Display', serif;
+            font-size: 48px;
+            color: var(--gold);
+            margin-bottom: 8px;
+        }
+
+        .social-proof-text {
+            font-size: 16px;
+            color: var(--gray-text);
+            letter-spacing: 0.05em;
+        }
+
+        /* Admin Link for Demo */
+        .admin-link {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            font-size: 12px;
+            color: var(--gray-mid);
+            text-decoration: none;
+            cursor: pointer;
+            z-index: 9999;
+            opacity: 0.2;
+        }
+
+        .admin-link:hover {
+            opacity: 1;
+            color: var(--gold);
+        }
+
+        /* ==================== FOOTER ==================== */
+        footer {
+            padding: 60px 0;
+            background: var(--black-deep);
+            border-top: 1px solid var(--gray-mid);
+        }
+
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .footer-logo {
+            font-family: 'Playfair Display', serif;
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            color: var(--white-warm);
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 32px;
+        }
+
+        .footer-links a {
+            color: var(--gray-text);
+            text-decoration: none;
+            font-size: 15px;
+            transition: color 0.3s ease;
+        }
+
+        .footer-links a:hover {
+            color: var(--gold);
+        }
+
+        .footer-social {
+            display: flex;
+            gap: 20px;
+        }
+
+        .footer-social a {
+            color: var(--gray-text);
+            transition: color 0.3s ease;
+        }
+
+        .footer-social a:hover {
+            color: var(--gold);
+        }
+
+        .footer-social svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* ==================== RESPONSIVE ==================== */
+        @media (max-width: 1024px) {
+
+            .concepto-grid,
+            .ejemplo-grid,
+            .para-quien-grid {
+                grid-template-columns: 1fr;
+                gap: 60px;
+            }
+
+            .steps-grid {
+                grid-template-columns: 1fr;
+                gap: 32px;
+            }
+
+            .concepto-visual {
+                order: -1;
+            }
+
+            .book-realistic {
+                width: 320px;
+                max-width: 80vw;
+                height: auto;
+                aspect-ratio: 2/3;
+                margin: 0 auto;
+                /* Center it */
+            }
+
+            .page-mockup {
+                transform: none;
+                max-width: 100%;
+            }
+        }
+
+        @media (max-width: 640px) {
+            body {
+                font-size: 17px;
+            }
+
+            section {
+                padding: 80px 0;
+            }
+
+            .header-cta {
+                display: none;
+            }
+
+            .hero {
+                padding: 100px 20px 60px;
+            }
+
+            .hero-decorative {
+                width: 300px;
+                height: 300px;
+            }
+
+            .hero-decorative::before {
+                width: 200px;
+                height: 200px;
+            }
+
+            .step {
+                padding: 40px 28px;
+            }
+
+            .chapter {
+                grid-template-columns: 1fr;
+                gap: 12px;
+                padding: 24px;
+            }
+
+            .chapter-num {
+                width: auto;
+            }
+
+            .precio-box {
+                padding: 40px 24px;
+            }
+
+            .precio-amount {
+                font-size: 56px;
+            }
+
+            .precio-features {
+                grid-template-columns: 1fr;
+            }
+
+            .form-container {
+                flex-direction: column;
+            }
+
+            .form-container button {
+                width: 100%;
+            }
+
+            .footer-content {
+                flex-direction: column;
+                gap: 32px;
+                text-align: center;
+            }
+
+            .footer-links {
+                flex-direction: column;
+                gap: 16px;
+            }
+        }
+
+        /* Scroll animations observer */
+        .reveal {
+            opacity: 0;
+            transform: translateY(40px);
+            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Mobile Adjustments for Realism */
+        @media (max-width: 480px) {
+            .hero h1 {
+                font-size: 42px;
+                /* Prevent too massive text */
+            }
+
+            .hero-decorative {
+                width: 280px;
+                height: 280px;
+            }
+
+            .container {
+                padding: 0 20px;
+            }
+
+            /* Ensure book doesn't overflow */
+            .book-realistic {
+                margin-top: 40px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="noise-overlay"></div>
+
+    <!-- Header -->
+    <header id="header">
+        <div class="container">
+            <div class="header-content">
+                <a href="#" class="logo">CARONTE</a>
+                <div class="header-actions">
+                    <a href="login.html" class="nav-link">Acceder</a>
+                    <a href="register.html" class="nav-link">Regístrate</a>
+                    <button class="header-cta"
+                        onclick="document.getElementById('waiting').scrollIntoView({behavior: 'smooth'})">
+                        Unirme a la lista
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero-decorative"></div>
+        <div class="hero-content">
+            <p class="hero-eyebrow animate-fade-in-up">La nueva literatura del futuro</p>
+            <h1 class="animate-fade-in-up delay-1">
+                Tu yo de dentro de 25 años<br>
+                <em>tiene algo que decirte.</em>
+            </h1>
+            <p class="hero-subtitle animate-fade-in-up delay-2">
+                Responde 40 preguntas. Recibe un libro único, escrito solo para ti, desde tu propio futuro.
+            </p>
+            <a href="#waiting" class="hero-cta animate-fade-in-up delay-3">
+                Quiero mi libro
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+            </a>
+            <p class="hero-meta animate-fade-in-up delay-4">
+                Lanzamiento febrero 2026 <span>·</span> 29,99€ <span>·</span> Envío a toda Europa
+            </p>
+        </div>
+        <div class="scroll-indicator">
+            <span>Descubre más</span>
+        </div>
+    </section>
+
+    <!-- Concepto -->
+    <section class="concepto">
+        <div class="container">
+            <div class="concepto-grid">
+                <div class="concepto-text reveal">
+                    <span class="section-label">El Concepto</span>
+                    <h2 class="section-title">No es predicción.<br>Es preparación.</h2>
+                    <p>
+                        Caronte adapta el scenario planning —metodología usada por Shell, el MIT o el World Economic
+                        Forum para anticipar futuros inciertos— a escala individual.
+                    </p>
+                    <p>
+                        Las 40 preguntas extraen tus variables críticas: patrones de decisión, tensiones no resueltas,
+                        valores nucleares, dinámicas relacionales. Un modelo de razonamiento avanzado (LRM) cruza estas
+                        variables para generar escenarios estadísticamente consistentes con quien eres.
+                    </p>
+                    <p>
+                        El resultado no es un informe. Es una narrativa. Porque tu cerebro no cambia con datos: cambia
+                        con historias.
+                    </p>
+                </div>
+                <div class="concepto-visual reveal">
+                    <div class="book-realistic">
+                        <img src="book-caronte-new.png" alt="Libro Caronte" class="book-bg-image">
+                        <!-- Text is now in the image -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Cómo Funciona -->
+    <section class="como-funciona">
+        <div class="container">
+            <div style="text-align: center; max-width: 600px; margin: 0 auto;" class="reveal">
+                <span class="section-label">Cómo funciona</span>
+                <h2 class="section-title">Tres pasos. Un libro que solo existe para ti.</h2>
+            </div>
+            <div class="steps-grid">
+                <div class="step reveal">
+                    <span class="step-number">01</span>
+                    <h3>Responde</h3>
+                    <p>40 preguntas sobre tu vida, tus miedos, tus relaciones, tu trabajo y tus sueños. Sin prisas.
+                        Tómate el tiempo que necesites.</p>
+                </div>
+                <div class="step reveal">
+                    <span class="step-number">02</span>
+                    <h3>Espera</h3>
+                    <p>En 7 días, tu libro se imprime y sale hacia tu dirección. Tapa blanda premium, diseño
+                        minimalista, tu nombre en la cubierta.</p>
+                </div>
+                <div class="step reveal">
+                    <span class="step-number">03</span>
+                    <h3>Lee</h3>
+                    <p>Recibe la carta más importante que jamás te escribirán. Y decide qué hacer con lo que descubras.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Capítulos -->
+    <section class="capitulos">
+        <div class="container">
+            <div class="capitulos-header reveal">
+                <span class="section-label">Contenido</span>
+                <h2 class="section-title">Un libro de 5 capítulos. Todos sobre ti.</h2>
+                <p class="section-subtitle">Cada libro es único. Dos personas nunca recibirán el mismo contenido.</p>
+            </div>
+            <div class="chapters-list reveal">
+                <div class="chapter">
+                    <span class="chapter-num">Capítulo I</span>
+                    <div class="chapter-content">
+                        <h4>El extraño que creías conocer</h4>
+                        <p>Quién eras realmente a los 30 y por qué esa versión de ti, vista desde el futuro, parece un
+                            completo desconocido lleno de miedos infundados.</p>
+                    </div>
+                </div>
+                <div class="chapter">
+                    <span class="chapter-num">Capítulo II</span>
+                    <div class="chapter-content">
+                        <h4>La decisión que lo cambió todo</h4>
+                        <p>Y las tres que fingiste no tomar, creyendo ingenuamente que la inacción te salvaría de las
+                            consecuencias que hoy pagamos.</p>
+                    </div>
+                </div>
+                <div class="chapter">
+                    <span class="chapter-num">Capítulo III</span>
+                    <div class="chapter-content">
+                        <h4>Los que merecían más de ti</h4>
+                        <p>Un recuento brutal sobre el amor y sus deudas, y la lista de nombres que borraste de tu vida
+                            por puro orgullo.</p>
+                    </div>
+                </div>
+                <div class="chapter">
+                    <span class="chapter-num">Capítulo IV</span>
+                    <div class="chapter-content">
+                        <h4>El tiempo que tiraste a la basura</h4>
+                        <p>Años que no van a volver, disueltos en distracciones vacías y batallas que nunca fueron
+                            realmente tuyas.</p>
+                    </div>
+                </div>
+                <div class="chapter">
+                    <span class="chapter-num">Capítulo V</span>
+                    <div class="chapter-content">
+                        <h4>Esto no es un consejo. Es una súplica.</h4>
+                        <p>Lo que necesito que hagas por los dos urgentemente, antes de que el peso del arrepentimiento
+                            sea la única herencia que nos quede.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Ejemplo -->
+    <section class="ejemplo">
+        <div class="container">
+            <div class="ejemplo-grid">
+                <div class="reveal">
+                    <span class="section-label">Un fragmento</span>
+                    <h2 class="section-title">Así suena tu futuro hablándote.</h2>
+                    <div class="ejemplo-note">
+                        <p>Este es un ejemplo ilustrativo. Tu libro será completamente diferente, basado únicamente en
+                            tus respuestas.</p>
+                    </div>
+                </div>
+                <div class="page-mockup reveal">
+                    <p><em>Tenías 34 años cuando dejaste ese trabajo que odiabas. Recuerdo el miedo. Recuerdo las noches
+                            sin dormir, calculando cuántos meses podías aguantar sin ingresos. Recuerdo a mamá
+                            diciéndote que estabas loco.</em></p>
+                    <p>Pero también recuerdo lo que vino después.</p>
+                    <p>No te voy a decir si fue la decisión correcta. Eso ya lo sabrás cuando llegues aquí. Lo que sí
+                        puedo decirte es esto: el miedo que sientes ahora no es una señal de que vayas a fracasar. Es
+                        una señal de que lo que estás a punto de hacer importa.</p>
+                    <p><em>Las cosas que no importan no dan miedo.</em></p>
+                    <span class="page-number">47</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Para Quién -->
+    <section class="para-quien">
+        <div class="container">
+            <div class="reveal">
+                <span class="section-label">Para quién es</span>
+                <h2 class="section-title">Caronte es para ti si...</h2>
+            </div>
+            <div class="para-quien-grid">
+                <ul class="para-quien-list reveal">
+                    <li>Estás en un momento de transición y necesitas claridad</li>
+                    <li>Sientes que tomas decisiones sin una brújula clara</li>
+                    <li>Quieres entenderte mejor, sin filtros ni autoengaños</li>
+                    <li>Buscas una herramienta de reflexión profunda, no consejos genéricos</li>
+                    <li>Crees que la mejor versión de ti mismo ya sabe lo que deberías hacer</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- Precio -->
+    <section class="precio">
+        <div class="container">
+            <div class="reveal">
+                <span class="section-label">Inversión</span>
+                <h2 class="section-title">Un libro. Tuyo para siempre.</h2>
+            </div>
+            <div class="precio-box reveal">
+                <div class="precio-amount">29<span>,99€</span></div>
+                <p class="precio-desc">Sin suscripciones. Un pago único.</p>
+                <div class="precio-features">
+                    <div class="precio-feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        <span>Tapa blanda premium, 15×23 cm</span>
+                    </div>
+                    <div class="precio-feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        <span>80-120 páginas personalizadas</span>
+                    </div>
+                    <div class="precio-feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        <span>Tu nombre en la cubierta</span>
+                    </div>
+                    <div class="precio-feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        <span>Envío 5-7 días (España y Europa)</span>
+                    </div>
+                </div>
+                <p class="text-gray" style="font-size: 15px;">
+                    Próximamente: tapa dura (+12€) · segunda copia (+19,99€) · PDF inmediato (+4,99€)
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Waiting List -->
+    <section class="waiting-list" id="waiting">
+        <div class="container">
+            <div class="waiting-list-content reveal">
+                <h2>Sé de los primeros en recibir el tuyo.</h2>
+                <p class="waiting-list-subtitle">
+                    Lanzamos en febrero de 2026. Los primeros 500 de la lista tendrán acceso anticipado y un 20% de
+                    descuento.
+                </p>
+                <form class="form-container" onsubmit="handleSubmit(event)">
+                    <input type="email" placeholder="tu@email.com" required id="email-input">
+                    <button type="submit">Unirme</button>
+                </form>
+                <p class="form-note">Sin spam. Solo te escribiremos cuando abramos el acceso.</p>
+                <div class="social-proof">
+                    <div id="counter" class="social-proof-number reveal">+5.000</div>
+                    <p class="social-proof-text reveal">personas ya esperan su libro</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-logo">CARONTE</div>
+                <div class="footer-links">
+                    <a href="#">Política de privacidad</a>
+                    <a href="#">Términos y condiciones</a>
+                </div>
+                <div class="footer-social">
+                    <a href="#" aria-label="Twitter">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                        </svg>
+                    </a>
+                    <a href="#" aria-label="Instagram">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+                            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+                            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+                        </svg>
+                    </a>
+                    <a href="#" aria-label="LinkedIn">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+                        </svg>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Custom Notification Modal -->
+    <div id="notification-modal" class="notification-overlay">
+        <div class="notification-content">
+            <h3 id="notification-title">Estado</h3>
+            <p id="notification-message">Mensaje...</p>
+            <button onclick="closeNotification()">Entendido</button>
+        </div>
+    </div>
+
+    <style>
+        /* Custom Notification Styles */
+        .notification-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            /* Dark dim */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            backdrop-filter: blur(5px);
+        }
+
+        .notification-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .notification-content {
+            background: var(--black-deep);
+            border: 1px solid var(--gold);
+            padding: 40px;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+            transform: translateY(20px);
+            transition: transform 0.3s ease;
+            box-shadow: 0 0 30px rgba(201, 169, 98, 0.15);
+        }
+
+        .notification-overlay.active .notification-content {
+            transform: translateY(0);
+        }
+
+        .notification-content h3 {
+            font-family: 'Playfair Display', serif;
+            font-size: 24px;
+            color: var(--gold);
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .notification-content p {
+            font-family: 'Times New Roman', serif;
+            font-size: 18px;
+            color: var(--gray-text);
+            margin-bottom: 32px;
+            line-height: 1.5;
+        }
+
+        .notification-content button {
+            background: transparent;
+            border: 1px solid var(--gold);
+            color: var(--gold);
+            padding: 12px 32px;
+            font-family: sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .notification-content button:hover {
+            background: var(--gold);
+            color: var(--black-deep);
+        }
+    </style>
+
+    <script>
+        // Notification Helpers
+        function showNotification(title, message) {
+            const modal = document.getElementById('notification-modal');
+            document.getElementById('notification-title').textContent = title;
+            document.getElementById('notification-message').innerHTML = message.replace(/\n/g, '<br>'); // Allow multiline
+            modal.classList.add('active');
+        }
+
+        function closeNotification() {
+            document.getElementById('notification-modal').classList.remove('active');
+        }
+    </script>
+
+    <a onclick="downloadCSV()" class="admin-link">Admin: Descargar CSV</a>
+
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    <script>
+        // Init EmailJS (Replace with your public key)
+        (function () {
+            // TUTORIAL: https://dashboard.emailjs.com/
+            // 1. Create account
+            // 2. Add Service (Gmail) -> Service ID
+            // 3. Add Template -> Template ID
+            // 4. Get Public Key from Account
+            emailjs.init("P0YKi7DlsATK9Tx-W");
+        })();
+    </script>
+    <script>
+        // --- Logic Modified for Persistence and CSV ---
+
+        // Configuration
+        const CONFIG = {
+            API_URL: 'http://localhost:3000',
+            LIST_KEY: 'caronte_waiting_list_v1',
+            BASE_COUNT: 1247
+        };
+
+        // Email Sending Function (Confirmation to User)
+        async function sendConfirmationEmail(userEmail) {
+            try {
+                const SERVICE_ID = 'service_mz3zd0q';
+                const TEMPLATE_ID = 'template_a1b2c3d';
+
+                await emailjs.send(SERVICE_ID, TEMPLATE_ID, {
+                    to_email: userEmail,
+                    reply_to: 'info@caronte.com'
+                });
+                console.log('Confirmation email sent');
+                showNotification('Acceso Concedido', 'Confirma tu entrada en el correo que te acabamos de enviar.<br><br><span style="font-size:14px; opacity:0.7">Revisa SPAM si no lo ves.</span>');
+
+                // Also notify admin
+                notifyAdmin(userEmail);
+
+            } catch (error) {
+                console.error('Email send failed', error);
+                // Only show error if strictly necessary, but for user UX "Success" + fallback is better
+                // But in dev mode we show error
+                // showNotification('Error de Envío', 'Hubo un error técnico. Inténtalo de nuevo.');
+            }
+        }
+
+        // Admin Notification Function (New Lead)
+        async function notifyAdmin(leadEmail) {
+            try {
+                const SERVICE_ID = 'service_mz3zd0q';
+                const TEMPLATE_ID = 'template_wp6689v';
+
+                // We reuse the same service but a DIFFERENT template intended for the admin
+                // In EmailJS dashboard, this template should send email TO: nestor.guerra@gmail.com
+                await emailjs.send(SERVICE_ID, TEMPLATE_ID, {
+                    user_email: leadEmail,
+                    date: new Date().toLocaleString(),
+                    title: 'Nuevo Lead Caronte'
+                });
+                console.log('Admin notification sent');
+            } catch (error) {
+                console.log('Admin notify failed');
+            }
+        }
+
+        // Header scroll effect
+        const header = document.getElementById('header');
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 100) {
+                header.classList.add('scrolled');
+            } else {
+                header.classList.remove('scrolled');
+            }
+        });
+
+        // Scroll reveal animations
+        const observerOptions = {
+            root: null,
+            rootMargin: '0px',
+            threshold: 0.1
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.reveal').forEach(el => {
+            observer.observe(el);
+        });
+
+        // Init Counter
+        // Init (No dynamic counter needed)
+
+
+        // Form submission
+        // Form submission with Server API
+        async function handleSubmit(e) {
+            e.preventDefault();
+            const emailInput = document.getElementById('email-input');
+            const email = emailInput.value;
+            const button = e.target.querySelector('button');
+            const originalText = button.textContent;
+
+            if (!email) return;
+
+            button.disabled = true;
+            button.textContent = 'Guardando...';
+
+            const IS_STATIC = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+
+            if (!IS_STATIC) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
+
+                try {
+                    const response = await fetch('http://localhost:3000/api/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: email }),
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        // Update counter with server truth
+                        const total = 1250 + data.count;
+                        const counter = document.getElementById('counter');
+                        if (counter) counter.textContent = total.toLocaleString('es-ES');
+
+                        showSuccess();
+                        return;
+                    }
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    console.log('Server not available (or timeout), falling back to local storage');
+                    // Continue to local storage fallback below
+                }
+            }
+
+            // Fallback: LocalStorage (Simulated Success for Static/Offline)
+            const list = JSON.parse(localStorage.getItem(CONFIG.LIST_KEY) || '[]');
+            if (!list.find(item => item.email === email)) {
+                list.push({ email: email, date: new Date().toISOString() });
+                localStorage.setItem(CONFIG.LIST_KEY, JSON.stringify(list));
+            }
+
+            // FORCE SEND (Debug Mode for User):
+            sendConfirmationEmail(email);
+
+            showSuccess();
+
+            function showSuccess() {
+                button.textContent = '✓ ¡Apuntado!';
+                button.style.background = '#2a7d4e';
+
+                setTimeout(() => {
+                    emailInput.value = '';
+                    button.textContent = originalText;
+                    button.style.background = '';
+                    button.disabled = false;
+                }, 3000);
+            }
+        }
+
+        // CSV Export Function
+        function downloadCSV() {
+            const IS_STATIC = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+
+            if (!IS_STATIC) {
+                // Try server first
+                const link = document.createElement("a");
+                link.href = "http://localhost:3000/waiting_list.csv";
+                link.download = "caronte_waiting_list.csv";
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } else {
+                // Client-side generation (GitHub Pages)
+                const list = JSON.parse(localStorage.getItem(CONFIG.LIST_KEY) || '[]');
+                if (list.length === 0) {
+                    alert('No hay registros locales para exportar.');
+                    return;
+                }
+
+                const csvContent = "data:text/csv;charset=utf-8,"
+                    + "Email,Date\n"
+                    + list.map(e => `${e.email},${e.date}`).join("\n");
+
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", "caronte_local_list.csv");
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+
+        // Smooth scroll for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>

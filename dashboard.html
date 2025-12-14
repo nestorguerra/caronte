@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard · Caronte</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            --black-deep: #0A0A0B;
+            --gray-dark: #1A1A1D;
+            --gray-mid: #2D2D32;
+            --gray-light: #4A4A4F;
+            --gray-text: #A0A0A8;
+            --white-warm: #F5F5F3;
+            --gold: #C9A962;
+            --gold-hover: #D4B978;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            background-color: var(--black-deep);
+            color: var(--white-warm);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+            /* Prevent body scroll if sidebar is fixed */
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: var(--gray-dark);
+            border-right: 1px solid var(--gray-mid);
+            display: flex;
+            flex-direction: column;
+            padding: 32px 24px;
+            height: 100vh;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            font-family: 'Playfair Display', serif;
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            color: var(--white-warm);
+            text-decoration: none;
+            margin-bottom: 60px;
+            display: block;
+        }
+
+        .nav-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            flex: 1;
+        }
+
+        .nav-btn {
+            background: transparent;
+            border: none;
+            color: var(--gray-text);
+            text-align: left;
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 18px;
+            padding: 12px 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .nav-btn:hover {
+            color: var(--white-warm);
+            background: var(--gray-mid);
+        }
+
+        .nav-btn.active {
+            color: var(--black-deep);
+            background: var(--gold);
+            font-weight: 600;
+        }
+
+        .nav-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .user-mini-profile {
+            margin-top: auto;
+            border-top: 1px solid var(--gray-mid);
+            padding-top: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-avatar-mini {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--gray-mid);
+            object-fit: cover;
+        }
+
+        .user-info-mini h4 {
+            font-size: 16px;
+            color: var(--white-warm);
+        }
+
+        .user-info-mini p {
+            font-size: 14px;
+            color: var(--gray-text);
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 40px 60px;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .section-content {
+            display: none;
+            max-width: 800px;
+            margin: 0 auto;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .section-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        h2.page-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 40px;
+            margin-bottom: 12px;
+            color: var(--gold);
+        }
+
+        p.page-subtitle {
+            font-size: 20px;
+            color: var(--gray-text);
+            margin-bottom: 0;
+        }
+
+        /* --- Profile Styles --- */
+        .profile-header {
+            display: flex;
+            gap: 40px;
+            align-items: start;
+            margin-bottom: 48px;
+        }
+
+        .photo-upload-container {
+            position: relative;
+            width: 150px;
+            height: 150px;
+        }
+
+        .profile-photo {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid var(--gold);
+            background: var(--gray-mid);
+        }
+
+        .upload-btn-overlay {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            background: var(--gold);
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--black-deep);
+            transition: background 0.2s;
+        }
+
+        .upload-btn-overlay:hover {
+            background: var(--gold-hover);
+        }
+
+        .hidden-input {
+            display: none;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-group.full-width {
+            grid-column: span 2;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 15px;
+            color: var(--gold);
+            margin-bottom: 8px;
+            letter-spacing: 0.05em;
+        }
+
+        .form-input {
+            width: 100%;
+            background: var(--gray-dark);
+            border: 1px solid var(--gray-mid);
+            color: var(--white-warm);
+            padding: 16px;
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 18px;
+            border-radius: 4px;
+        }
+
+        .form-input:focus {
+            border-color: var(--gold);
+            outline: none;
+        }
+
+        .save-btn {
+            background: var(--gold);
+            color: var(--black-deep);
+            border: none;
+            padding: 16px 32px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .save-btn:hover {
+            background: var(--gold-hover);
+        }
+
+        /* --- Interview Styles --- */
+        .question-card {
+            background: var(--gray-dark);
+            border: 1px solid var(--gray-mid);
+            padding: 32px;
+            margin-bottom: 24px;
+            border-radius: 8px;
+        }
+
+        .question-title {
+            font-size: 18px;
+            color: var(--gold);
+            margin-bottom: 16px;
+            font-family: 'Playfair Display', serif;
+        }
+
+        .question-text {
+            font-size: 22px;
+            margin-bottom: 24px;
+            line-height: 1.4;
+        }
+
+        .answer-area {
+            width: 100%;
+            min-height: 120px;
+            background: var(--black-deep);
+            border: 1px solid var(--gray-mid);
+            color: var(--white-warm);
+            padding: 16px;
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 18px;
+            border-radius: 4px;
+            resize: vertical;
+        }
+
+        .answer-area:focus {
+            border-color: var(--gold);
+            outline: none;
+        }
+
+        /* --- Book Styles --- */
+        .book-display {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding: 0;
+        }
+
+        .book-realistic {
+            position: relative;
+            width: 350px;
+            /* Smaller book size */
+            aspect-ratio: 2/3;
+            filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.6));
+            margin-bottom: 0;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .book-bg-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .download-btn {
+            display: inline-flex;
+            gap: 12px;
+            align-items: center;
+            background: var(--gold);
+            color: var(--black-deep);
+            border: none;
+            padding: 16px 32px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 4px;
+            text-decoration: none;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column;
+                height: 100vh;
+                /* Restore height constraint */
+                overflow: hidden;
+            }
+
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                z-index: 1000;
+                transform: translateX(-100%);
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                width: 280px;
+                box-shadow: 10px 0 20px rgba(0, 0, 0, 0.5);
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            /* Overlay for mobile sidebar */
+            .sidebar-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.7);
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
+                /* Safari support */
+                z-index: 999;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.3s;
+            }
+
+            .sidebar-overlay.active {
+                opacity: 1;
+                pointer-events: auto;
+            }
+
+            .main-content {
+                padding: 80px 20px 40px;
+                /* Top padding for mobile header */
+                width: 100%;
+            }
+
+            /* Mobile Header with Hamburger */
+            .mobile-header {
+                display: flex !important;
+                /* Force show */
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 60px;
+                background: rgba(10, 10, 11, 0.95);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                z-index: 900;
+                border-bottom: 1px solid var(--gray-mid);
+                align-items: center;
+                /* Vertical center */
+                padding: 0 20px;
+                justify-content: space-between;
+            }
+
+            .menu-toggle {
+                background: none;
+                border: none;
+                color: var(--gold);
+                cursor: pointer;
+                padding: 8px;
+            }
+
+            .book-realistic {
+                width: 300px;
+                /* Reduced for mobile */
+                max-width: 90%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Mobile Overlay -->
+    <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+    <!-- Mobile Header -->
+    <div class="mobile-header" style="display:none;">
+        <button class="menu-toggle" onclick="toggleSidebar()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        </button>
+        <span style="font-family:'Playfair Display'; color:var(--white-warm); font-size:20px;">CARONTE</span>
+        <div style="width:24px"></div>
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <a href="index.html" class="logo">CARONTE</a>
+
+        <nav class="nav-menu">
+            <button type="button" class="nav-btn active" onclick="switchTab('profile')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                Mi Perfil
+            </button>
+            <button type="button" class="nav-btn" onclick="switchTab('interview')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                La Entrevista
+            </button>
+            <button type="button" class="nav-btn" onclick="switchTab('book')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                </svg>
+                Mi Libro
+            </button>
+        </nav>
+
+        <div class="user-mini-profile">
+            <img src="https://via.placeholder.com/40" alt="Avatar" class="user-avatar-mini" id="mini-avatar">
+            <div class="user-info-mini">
+                <h4 id="mini-name">Usuario</h4>
+                <p id="mini-email">cargando...</p>
+            </div>
+            <button onclick="logout()"
+                style="margin-left:auto; background:none; border:none; color:var(--gray-text); cursor:pointer;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    style="width:16px;height:16px;">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+        <!-- SECTION: PROFILE -->
+        <section id="profile-section" class="section-content active">
+            <h2 class="page-title">Mi Perfil</h2>
+            <p class="page-subtitle">Cuéntanos quién eres hoy, para que sepamos quién serás mañana.</p>
+
+            <div class="profile-header">
+                <div class="photo-upload-container">
+                    <img src="https://via.placeholder.com/150" id="profile-img-preview" class="profile-photo">
+                    <input type="file" id="photo-input" class="hidden-input" accept="image/*"
+                        onchange="handlePhotoUpload(this)">
+                    <button class="upload-btn-overlay" onclick="document.getElementById('photo-input').click()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;">
+                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z">
+                            </path>
+                            <circle cx="12" cy="13" r="4"></circle>
+                        </svg>
+                    </button>
+                </div>
+                <div style="flex:1">
+                    <h3>Tu identidad visual</h3>
+                    <p style="color:var(--gray-text); margin-top:8px;">Esta foto se usará para personalizar la cubierta
+                        de tu libro si eliges esa opción, y para tu pasaporte Caronte.</p>
+                </div>
+            </div>
+
+            <form class="form-grid" onsubmit="saveProfile(event)">
+                <div class="form-group">
+                    <label>Nombre Completo</label>
+                    <input type="text" id="p-name" class="form-input" placeholder="Tu nombre real">
+                </div>
+                <div class="form-group">
+                    <label>Edad Actual</label>
+                    <input type="number" id="p-age" class="form-input" placeholder="Ej: 34">
+                </div>
+                <div class="form-group">
+                    <label>Ocupación</label>
+                    <input type="text" id="p-job" class="form-input" placeholder="¿A qué te dedicas?">
+                </div>
+                <div class="form-group">
+                    <label>Ciudad de Residencia</label>
+                    <input type="text" id="p-city" class="form-input" placeholder="¿Dónde vives?">
+                </div>
+
+                <div class="form-group full-width">
+                    <button type="submit" class="save-btn">Guardar Cambios</button>
+                    <span id="save-msg"
+                        style="margin-left:16px; color:var(--gold); opacity:0; transition:opacity 0.3s;">✓ Guardado
+                        correctamente</span>
+                </div>
+            </form>
+        </section>
+
+        <!-- SECTION: INTERVIEW -->
+        <section id="interview-section" class="section-content">
+            <h2 class="page-title">La Entrevista</h2>
+            <p class="page-subtitle">10 preguntas para desbloquear tu futuro. Responde con sinceridad.</p>
+
+            <div style="display:flex; justify-content:flex-end; margin-bottom: 24px;">
+                <button type="button" class="save-btn" onclick="saveInterview()">Guardar Progreso</button>
+            </div>
+
+            <div id="questions-container">
+                <!-- Javascript will inject questions here -->
+            </div>
+
+            <div style="display:flex; justify-content:center; margin-top: 32px; margin-bottom: 40px;">
+                <button type="button" class="save-btn" onclick="saveInterview()"
+                    style="width: 100%; max-width: 300px;">Guardar
+                    Todo</button>
+            </div>
+        </section>
+
+        <!-- SECTION: BOOK -->
+        <section id="book-section" class="section-content">
+            <h2 class="page-title">Mi Libro</h2>
+            <p class="page-subtitle">Tu manuscrito personalizado está listo.</p>
+
+            <div class="book-display">
+                <div class="book-realistic">
+                    <img src="book-caronte-new.png" alt="Libro Caronte" class="book-bg-image">
+                </div>
+
+                <h3 style="font-size:32px; margin-bottom:16px; font-family:'Playfair Display', serif;">Tu yo futuro te
+                    ha escrito.</h3>
+                <p style="color:var(--gray-text); max-width:600px; margin-bottom:40px; font-size:18px;">
+                    Hemos procesado tus respuestas (bueno, las simuladas por ahora).
+                    Aquí tienes el resultado final de tu experiencia.
+                </p>
+
+                <div class="download-actions"
+                    style="display: flex; gap: 16px; justify-content: center; margin-top: 24px;">
+                    <a href="#" class="download-btn" onclick="downloadPDF(event)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:24px">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        PDF
+                    </a>
+                    <a href="#" class="download-btn" onclick="downloadEPUB(event)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:24px">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                        </svg>
+                        ePub
+                    </a>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="js/dashboard.js"></script>
+</body>
+
+</html>
