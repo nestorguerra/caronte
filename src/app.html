@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LicitIA - Cockpit</title>
+  <link rel="icon" href="./favicon.svg?v=20260502" type="image/svg+xml">
+  <link rel="shortcut icon" href="./favicon.svg?v=20260502" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles/app.css">
+  <script src="./config/env.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Saltar al contenido</a>
+  <main class="app-page">
+    <aside class="sidebar" aria-label="Navegacion principal">
+      <div class="sidebar-top">
+        <a href="#hoy" class="brand-mark app-brand" aria-label="Ir a Hoy">
+          <span class="brand-icon" aria-hidden="true">L</span>
+          <span translate="no">LicitIA</span>
+        </a>
+        <p class="sidebar-caption">Beta productiva</p>
+        <nav aria-label="Espacios de trabajo">
+          <a href="#hoy" class="is-active" data-nav-link="hoy" aria-current="page"><span aria-hidden="true"></span>Hoy</a>
+          <a href="#oportunidades" data-nav-link="oportunidades"><span aria-hidden="true"></span>Oportunidades</a>
+          <a href="#expedientes" data-nav-link="expedientes"><span aria-hidden="true"></span>Expedientes</a>
+          <a href="#propuestas" data-nav-link="propuestas"><span aria-hidden="true"></span>Propuestas</a>
+          <a href="#inteligencia" data-nav-link="inteligencia"><span aria-hidden="true"></span>Inteligencia</a>
+          <a href="#operaciones" data-nav-link="operaciones" data-admin-only hidden><span aria-hidden="true"></span>Operaciones</a>
+          <a href="#ajustes" data-nav-link="ajustes"><span aria-hidden="true"></span>Ajustes</a>
+        </nav>
+      </div>
+      <div class="sidebar-bottom">
+        <div class="sidebar-user">
+          <span>Workspace</span>
+          <strong id="sidebarOrgName">LicitIA beta</strong>
+        </div>
+      </div>
+    </aside>
+
+    <section class="main" id="mainContent" tabindex="-1">
+      <header class="topbar nav-target" id="hoy" data-nav-section="hoy">
+        <div class="topbar-title">
+          <p class="eyebrow">Workspace LicitIA</p>
+          <h1 id="viewTitle">Hoy</h1>
+          <p id="cockpitSubtitle">Cargando organizacion, plan beta y onboarding.</p>
+        </div>
+        <form class="global-search" id="globalSearchForm" role="search">
+          <label class="sr-only" for="globalSearchInput">Buscar licitaciones</label>
+          <input id="globalSearchInput" type="search" placeholder="Buscar CPV, organismo o palabra clave..." autocomplete="off">
+          <button type="submit" class="secondary-button">Buscar</button>
+        </form>
+        <div class="topbar-actions" aria-label="Estado de la plataforma">
+          <span class="org-chip" id="activeOrgName">Organizacion</span>
+          <span class="status-pill" id="systemStatus" aria-live="polite">Comprobando API</span>
+          <div class="user-menu">
+            <button type="button" class="user-menu-button" id="userMenuButton" aria-haspopup="true" aria-expanded="false" aria-controls="userMenuPanel">
+              <span class="user-avatar" id="userInitials">U</span>
+              <span class="user-menu-copy">
+                <strong id="userDisplayName">Usuario</strong>
+                <small id="userMenuEmail">cargando...</small>
+              </span>
+            </button>
+            <div class="user-menu-panel" id="userMenuPanel" hidden>
+              <button type="button" data-user-menu-action="cuenta">Mi cuenta</button>
+              <button type="button" data-user-menu-action="empresa">Perfil empresa</button>
+              <button type="button" data-user-menu-action="equipo">Equipo</button>
+              <button type="button" data-user-menu-action="sistema">Configuracion sistema</button>
+              <button type="button" data-user-menu-action="operaciones" data-admin-only hidden>Operaciones admin</button>
+              <button type="button" id="logoutButton">Cerrar sesion</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div class="metric-grid" data-view-panel="hoy">
+        <div class="metric">
+          <span>Usuario</span>
+          <strong id="userEmailMetric">cargando...</strong>
+        </div>
+        <div class="metric">
+          <span>Plan</span>
+          <strong id="planStatus">-</strong>
+        </div>
+        <div class="metric">
+          <span>Perfil</span>
+          <strong id="profileProgress">-</strong>
+        </div>
+        <div class="metric">
+          <span>Busquedas</span>
+          <strong id="savedSearchCount">-</strong>
+        </div>
+      </div>
+
+      <div class="workspace" data-view-panel="hoy">
+        <section class="panel emphasis-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Prioridad diaria</p>
+              <h2>Hoy requiere atencion</h2>
+              <p>Tu cola operativa combina alertas, vencimientos, oportunidades nuevas y preparacion pendiente.</p>
+            </div>
+          </div>
+          <div class="action-queue">
+            <div class="queue-item">
+              <strong>Revisar oportunidades nuevas</strong>
+              <span>Usa tus busquedas guardadas para detectar concursos con encaje alto.</span>
+            </div>
+            <div class="queue-item">
+              <strong>Validar decisiones GO/NO-GO</strong>
+              <span>Abre una ficha para ver score, riesgos, documentos y evidencias oficiales.</span>
+            </div>
+            <div class="queue-item">
+              <strong>Preparar expedientes activos</strong>
+              <span>Checklist, tareas, hitos, propuesta y dossier quedan agrupados por licitacion.</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel nav-target" id="alertas" data-nav-section="alertas">
+          <div class="section-title">
+            <div>
+              <h2>Busquedas y alertas iniciales</h2>
+              <p>Configuracion creada durante el onboarding para arrancar el seguimiento comercial.</p>
+            </div>
+          </div>
+          <div class="data-list" id="savedSearchList"></div>
+        </section>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="oportunidades">
+        <section class="panel nav-target" id="oportunidades" data-nav-section="oportunidades">
+          <div class="section-title">
+            <div>
+              <h2>Buscar licitaciones oficiales</h2>
+              <p>Busqueda backend sobre datos normalizados de BOE/PLACSP. Los filtros no se ejecutan en navegador.</p>
+            </div>
+            <button type="button" class="secondary-button" id="runAlertsButton">Evaluar alertas</button>
+          </div>
+
+          <form id="tenderSearchForm" class="form-grid">
+            <div class="opportunity-search-main">
+              <label>Texto
+                <input name="query" type="search" placeholder="cloud, limpieza, consultoria..." autocomplete="off">
+              </label>
+              <label>Orden
+                <select name="sort">
+                  <option value="score">Score</option>
+                  <option value="publication">Publicacion</option>
+                  <option value="deadline">Fecha limite</option>
+                  <option value="amount">Importe</option>
+                </select>
+              </label>
+              <button type="submit" class="primary-button">Buscar</button>
+            </div>
+
+            <div class="quick-filter-bar" aria-label="Filtros rapidos">
+              <label class="checkbox-line">
+                <input name="onlyOpen" type="checkbox" checked>
+                <span>Solo abiertas</span>
+              </label>
+              <label class="checkbox-line">
+                <input name="withDocuments" type="checkbox">
+                <span>Con documentos</span>
+              </label>
+              <span class="free-pill">Vista: oportunidades relevantes</span>
+            </div>
+
+            <details class="advanced-filters">
+              <summary>Filtros avanzados</summary>
+              <div class="form-grid three-col">
+                <label>CPV
+                  <input name="cpv" type="text" placeholder="72000000" autocomplete="off">
+                </label>
+                <label>Organismo
+                  <input name="contractingBody" type="text" placeholder="Ayuntamiento, consejeria..." autocomplete="off">
+                </label>
+                <label>Territorio
+                  <input name="region" type="text" placeholder="Madrid" autocomplete="off">
+                </label>
+              </div>
+              <div class="form-grid three-col">
+                <label>Importe min EUR
+                  <input name="amountMin" type="number" min="0" inputmode="numeric">
+                </label>
+                <label>Importe max EUR
+                  <input name="amountMax" type="number" min="0" inputmode="numeric">
+                </label>
+                <label>Procedimiento
+                  <input name="procedureType" type="text" autocomplete="off">
+                </label>
+              </div>
+              <label>Estado
+                <input name="status" type="text" placeholder="published, open..." autocomplete="off">
+              </label>
+            </details>
+
+            <div class="filter-chips" id="activeFilterChips" aria-live="polite"></div>
+          </form>
+
+          <div class="search-results-layout opportunity-board">
+            <div class="opportunity-results-shell">
+              <div class="table-toolbar">
+                <span id="opportunityResultSummary">Ejecuta una busqueda para ver oportunidades.</span>
+                <span id="opportunitySelectionState">0 seleccionadas</span>
+              </div>
+              <div class="opportunity-table" id="tenderResults"></div>
+            </div>
+            <aside class="detail-panel" id="tenderDetail">
+              <div class="empty-detail">
+                <strong>Ficha 360</strong>
+                <p>Selecciona una licitacion para ver resumen, documentos, decision, tareas, propuesta y auditoria sin perder la busqueda.</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="expedientes oportunidades">
+        <section class="panel nav-target" id="expedientes" data-nav-section="expedientes">
+          <div class="section-title">
+            <div>
+              <h2>Decision Go/No-Go y preparacion</h2>
+              <p>Scoring explicable, analisis con citas oficiales, checklist, tareas e hitos del expediente.</p>
+            </div>
+            <span class="free-pill" id="decisionState">Selecciona una licitacion</span>
+          </div>
+          <div class="decision-grid">
+            <div class="decision-card" id="decisionPanel">
+              <h3>Score explicable</h3>
+              <p>Calcula el encaje cuando abras una ficha.</p>
+            </div>
+            <div class="decision-card" id="analysisPanel">
+              <h3>Analisis IA</h3>
+              <p>Sin analisis generado todavia.</p>
+            </div>
+          </div>
+          <div class="workflow-panel" id="workflowPanel">
+            <h3>Checklist, tareas e hitos</h3>
+            <p>Prepara el expediente desde la ficha de una oportunidad.</p>
+          </div>
+        </section>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="propuestas oportunidades">
+        <section class="panel nav-target" id="propuestas" data-nav-section="propuestas">
+          <div class="section-title">
+            <div>
+              <h2>Propuesta y dossier</h2>
+              <p>Borrador tecnico versionado, revision, documentacion y dossier exportable.</p>
+            </div>
+            <span class="free-pill" id="sprint5State">Listo</span>
+          </div>
+          <div class="proposal-studio" aria-label="Estudio de propuesta">
+            <aside class="studio-card proposal-evidence-panel" id="proposalEvidencePanel">
+              <span class="eyebrow">Fuentes</span>
+              <h3>Contexto oficial</h3>
+              <p>Selecciona una licitacion para fijar requisitos, documentos y datos de trabajo.</p>
+            </aside>
+            <div class="studio-card proposal-editor-panel" id="proposalPanel">
+              <span class="eyebrow">Editor</span>
+              <h3>Copiloto de propuesta</h3>
+              <p>Genera un borrador tecnico editable desde una ficha 360.</p>
+            </div>
+            <aside class="studio-card proposal-review-panel" id="proposalReviewPanel">
+              <span class="eyebrow">Revision</span>
+              <h3>Calidad y riesgos</h3>
+              <p>Cuando revises la propuesta veras puntuacion por seccion y sugerencias.</p>
+            </aside>
+          </div>
+          <div class="dossier-board" aria-label="Dossier documental">
+            <div class="dossier-board-header">
+              <div>
+                <span class="eyebrow">Dossier</span>
+                <h3>Checklist documental y export ZIP</h3>
+              </div>
+              <p>Estado de documentacion obligatoria, referencias oficiales y manifiesto exportable.</p>
+            </div>
+            <div class="dossier-panel" id="dossierPanel">
+              <h3>Dossier de candidatura</h3>
+              <p>Prepara checklist documental y export ZIP desde una oportunidad.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="inteligencia">
+        <section class="panel nav-target" id="inteligencia" data-nav-section="inteligencia">
+          <div class="section-title">
+            <div>
+              <h2>Inteligencia competitiva</h2>
+              <p>Historico de adjudicaciones, bajas y escenarios economicos para preparar estrategia.</p>
+            </div>
+          </div>
+          <div class="intel-workspace" aria-label="Inteligencia competitiva">
+            <section class="intel-main-panel" id="competitivePanel">
+              <span class="eyebrow">Mercado</span>
+              <h3>Dashboard competitivo</h3>
+              <p>Cargando historico competitivo.</p>
+            </section>
+            <aside class="intel-side-stack">
+              <section class="intel-side-panel" id="pricingScenarioPanel">
+                <span class="eyebrow">Escenario</span>
+                <h3>Oferta economica</h3>
+                <p>Selecciona una oportunidad para simular una baja recomendada.</p>
+              </section>
+              <section class="intel-side-panel" id="marketRiskPanel">
+                <span class="eyebrow">Riesgo</span>
+                <h3>Lectura ejecutiva</h3>
+                <p>El riesgo se calcula con historico, bajas y concentracion de adjudicatarios.</p>
+              </section>
+            </aside>
+          </div>
+        </section>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="hoy operaciones">
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <h2>Salud del sistema</h2>
+              <p>Estado de API, base de datos, ingesta oficial, alertas, IA y trabajo pendiente.</p>
+            </div>
+            <span class="free-pill" id="healthState">Cargando</span>
+          </div>
+          <div class="health-grid" id="systemHealthPanel"></div>
+        </section>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="ajustes">
+        <section class="panel nav-target" id="cuenta" data-nav-section="cuenta">
+          <div class="section-title">
+            <div>
+              <h2>Cuenta y sistema</h2>
+              <p>Preferencias personales, nombre visible y configuracion basica del entorno.</p>
+            </div>
+            <span class="free-pill" id="accountSaveState">Listo</span>
+          </div>
+
+          <div class="settings-layout">
+            <div class="settings-main-stack">
+              <form id="accountSettingsForm" class="form-grid">
+                <div class="form-grid two-col">
+                  <label>Nombre visible
+                    <input name="fullName" id="accountFullName" type="text" autocomplete="name" placeholder="Tu nombre">
+                  </label>
+                  <label>Email
+                    <input id="accountEmail" type="email" disabled>
+                  </label>
+                </div>
+                <div class="form-grid three-col">
+                  <label>Vista inicial
+                    <select name="defaultView">
+                      <option value="hoy">Hoy</option>
+                      <option value="oportunidades">Oportunidades</option>
+                      <option value="expedientes">Expedientes</option>
+                      <option value="propuestas">Propuestas</option>
+                    </select>
+                  </label>
+                  <label>Densidad
+                    <select name="density">
+                      <option value="comfortable">Comoda</option>
+                      <option value="compact">Compacta</option>
+                    </select>
+                  </label>
+                  <label>Alertas email
+                    <select name="notificationCadence">
+                      <option value="daily">Diarias</option>
+                      <option value="weekly">Semanales</option>
+                      <option value="off">Pausadas</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="form-footer">
+                  <button type="submit" class="primary-button">Guardar cuenta</button>
+                </div>
+              </form>
+
+              <form id="aiSettingsForm" class="form-grid ai-settings-card">
+                <div class="section-title mini-section-title">
+                  <div>
+                    <h3>Configuracion GPT</h3>
+                    <p>Clave local y modelo para generar propuestas tecnicas.</p>
+                  </div>
+                  <span class="free-pill" id="aiSaveState">Listo</span>
+                </div>
+                <div class="form-grid two-col">
+                  <label>API key OpenAI
+                    <input name="openaiApiKey" id="openaiApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...">
+                  </label>
+                  <label>Modelo GPT
+                    <select name="openaiModel" id="openaiModel">
+                      <option value="gpt-5.5">GPT-5.5</option>
+                      <option value="gpt-5.4">GPT-5.4</option>
+                      <option value="gpt-5.4-mini">GPT-5.4 mini</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="form-footer">
+                  <button type="submit" class="primary-button">Guardar GPT</button>
+                  <button type="button" class="secondary-button" id="clearAiKeyButton">Borrar clave</button>
+                </div>
+              </form>
+            </div>
+
+            <aside class="settings-summary" id="systemSettingsPanel" aria-live="polite">
+              <h3>Configuracion del sistema</h3>
+              <p>Cargando rol, plan y estado de backend.</p>
+            </aside>
+          </div>
+        </section>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="ajustes">
+        <section class="panel nav-target" id="ajustes" data-nav-section="ajustes">
+          <div class="section-title">
+            <div>
+              <h2>Perfil empresarial</h2>
+              <p>Editable despues del alta. Estos datos alimentaran scoring, alertas y recomendaciones Go/No-Go.</p>
+            </div>
+            <span class="free-pill" id="profileSaveState">Listo</span>
+          </div>
+
+          <form id="profileEditForm" class="form-grid">
+            <input type="hidden" name="organizationId" id="profileOrganizationId">
+            <div class="form-grid two-col">
+              <label>Nombre fiscal
+                <input name="legalName" type="text" required>
+              </label>
+              <label>Nombre comercial
+                <input name="tradeName" type="text">
+              </label>
+            </div>
+            <label>Descripcion de servicios
+              <textarea name="servicesDescription" required></textarea>
+            </label>
+            <div class="form-grid two-col">
+              <label>CPV objetivo
+                <input name="targetCpvs" type="text" required>
+              </label>
+              <label>Ambito geografico
+                <input name="regions" type="text" required>
+              </label>
+            </div>
+            <div class="form-grid two-col">
+              <label>Facturacion anual
+                <select name="revenueRange">
+                  <option value="">Selecciona</option>
+                  <option value="0-500k">0 - 500k</option>
+                  <option value="500k-2m">500k - 2M</option>
+                  <option value="2m-10m">2M - 10M</option>
+                  <option value="+10m">+10M</option>
+                </select>
+              </label>
+              <label>Equipo
+                <select name="employeeRange">
+                  <option value="">Selecciona</option>
+                  <option value="1-10">1 - 10</option>
+                  <option value="11-50">11 - 50</option>
+                  <option value="51-250">51 - 250</option>
+                  <option value="+250">+250</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-grid two-col">
+              <label>Importe minimo EUR
+                <input name="amountMin" type="number" min="0">
+              </label>
+              <label>Importe maximo EUR
+                <input name="amountMax" type="number" min="0">
+              </label>
+            </div>
+            <label>Tipos de contrato
+              <input name="contractTypes" type="text">
+            </label>
+            <div class="form-footer">
+              <button type="submit" class="primary-button">Guardar cambios</button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="ajustes">
+        <aside class="panel nav-target" id="equipo" data-nav-section="equipo">
+          <h2>Equipo invitado</h2>
+          <p>Invitaciones registradas para la beta. El envio transaccional queda para el sprint de notificaciones.</p>
+          <div class="data-list" id="invitationList"></div>
+        </aside>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="operaciones" data-admin-only hidden>
+        <section class="panel nav-target" id="operaciones" data-nav-section="operaciones">
+          <div class="section-title">
+            <div>
+              <h2>Operacion, seguridad y beta</h2>
+              <p>Backups, errores, checks de release, organizaciones e invitaciones.</p>
+            </div>
+            <span class="free-pill" id="opsState">Cargando</span>
+          </div>
+          <div class="ops-workspace">
+            <div class="ops-tabbar" role="tablist" aria-label="Operaciones admin">
+              <button type="button" class="is-active" data-ops-tab="salud" role="tab" aria-selected="true">Salud</button>
+              <button type="button" data-ops-tab="errores" role="tab" aria-selected="false">Errores</button>
+              <button type="button" data-ops-tab="backups" role="tab" aria-selected="false">Backups</button>
+              <button type="button" data-ops-tab="usuarios" role="tab" aria-selected="false">Usuarios</button>
+              <button type="button" data-ops-tab="release" role="tab" aria-selected="false">Release</button>
+              <button type="button" data-ops-tab="medicion" role="tab" aria-selected="false">Medicion</button>
+            </div>
+            <div class="ops-overview-strip" id="opsOverviewPanel" aria-live="polite"></div>
+            <div class="ops-panels">
+              <section class="ops-panel is-active" id="opsHealthPanel" data-ops-panel="salud" role="tabpanel">
+                <h3>Salud operativa</h3>
+                <p>Cargando estado de organizaciones, errores y alertas.</p>
+              </section>
+              <section class="ops-panel" id="observabilityPanel" data-ops-panel="errores" role="tabpanel" hidden>
+                <h3>Errores y alertas</h3>
+                <p>Cargando errores y alertas internas.</p>
+              </section>
+              <section class="ops-panel" id="opsPanel" data-ops-panel="backups" role="tabpanel" hidden>
+                <h3>Backups y organizaciones</h3>
+                <p>Cargando panel operativo.</p>
+              </section>
+              <section class="ops-panel" id="opsUsersPanel" data-ops-panel="usuarios" role="tabpanel" hidden>
+                <h3>Usuarios e invitaciones</h3>
+                <p>Cargando miembros e invitaciones.</p>
+              </section>
+              <section class="ops-panel" id="releasePanel" data-ops-panel="release" role="tabpanel" hidden>
+                <h3>Checks de salida</h3>
+                <p>Cargando checklist de produccion.</p>
+              </section>
+              <section class="ops-panel" id="uxMetricsPanel" data-ops-panel="medicion" role="tabpanel" hidden>
+                <h3>Medicion de producto</h3>
+                <p>Cargando eventos de conversion y uso critico.</p>
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="workspace workspace-full mt-22" data-view-panel="operaciones ajustes">
+        <section class="panel">
+          <h2>Auditoria reciente</h2>
+          <p>Actividad critica registrada por backend para el owner/admin.</p>
+          <ul class="audit-list" id="auditList"></ul>
+        </section>
+      </div>
+    </section>
+  </main>
+  <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="./scripts/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "caronte-production",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "validate": "node scripts/validate.mjs",
+    "test": "node scripts/test-future-book-sprint0.mjs && node scripts/test-future-book-sprint1.mjs && node scripts/test-future-book-sprint2.mjs && node scripts/test-future-book-sprint3.mjs && node scripts/test-future-book-sprint4.mjs && node scripts/test-future-book-sprint5.mjs && node scripts/test-future-book-sprint6.mjs && node scripts/test-future-book-sprint7.mjs && node scripts/test-future-book-sprint8.mjs && node scripts/test-future-book-sprint9.mjs && node scripts/test-future-book-sprint10.mjs && node scripts/test-future-book-sprint12.mjs && node scripts/test-future-book-sprint13.mjs && node scripts/test-future-book-sprint14.mjs && node scripts/test-future-book-sprint15.mjs && node scripts/test-sprint1.mjs && node scripts/test-production-flows.mjs",
+    "configure:auth": "node scripts/configure-supabase-auth.mjs",
+    "serve": "python3 -m http.server 8765 --directory dist --bind 127.0.0.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

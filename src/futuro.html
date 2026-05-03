@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co; frame-src 'self' data: blob: https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>Futuro Anterior - Acceso</title>
+  <meta name="description" content="Acceso privado a Futuro Anterior: entrevista de 21 preguntas y libro personal generado desde futuros plausibles.">
+  <link rel="stylesheet" href="./styles/future-book.css">
+  <script src="./config/env.js"></script>
+</head>
+<body class="future-page is-booting">
+  <section class="client-boot" id="futureBoot" aria-live="polite">
+    <div class="client-terminal-icon" aria-hidden="true">&gt;_</div>
+    <p>loading</p>
+  </section>
+  <section class="client-intro" id="futureIntro" hidden aria-live="polite">
+    <pre id="futureIntroLog"></pre>
+  </section>
+  <main class="future-shell">
+    <pre class="client-persistent-log" id="futurePersistentLog" hidden></pre>
+    <section class="future-hero" aria-labelledby="futureTitle">
+      <div class="future-brand" aria-label="Futuro Anterior">
+        <span class="future-sigil">fa</span>
+        <span>future_node_49:/ephemeral</span>
+      </div>
+
+      <div class="future-copy">
+        <p class="future-kicker">tty access / ephemeral link / 49 eur</p>
+        <h1 id="futureTitle">login: unknown_user</h1>
+        <p>session opened. voice interview pending. output: private book from plausible futures. prediction=false.</p>
+      </div>
+
+      <div class="future-footnote" aria-label="Estado de acceso">
+        <span id="sessionStatus">Preparando acceso</span>
+        <span>support=null / store=null / phone=null</span>
+      </div>
+    </section>
+
+    <section class="future-console" aria-label="Acceso a la entrevista">
+      <div class="console-header">
+        <div>
+          <p class="console-step" id="stepLabel">stage 01/05</p>
+          <h2 id="consoleTitle">gate abierto</h2>
+        </div>
+        <div class="price-mark" aria-label="Precio">49,95 EUR</div>
+      </div>
+
+      <div class="progress-rail" aria-hidden="true">
+        <span id="progressBar"></span>
+      </div>
+
+      <pre class="ritual-log" id="ritualLog" aria-live="polite"></pre>
+
+      <form id="nameGate" class="name-stage">
+        <label for="nameInput">
+          <span id="namePromptLabel">future@autonomous-system ~ %</span>
+          <input id="nameInput" name="name" type="text" autocomplete="off" autofocus>
+        </label>
+        <button class="future-button" type="submit">
+          <span>enter</span>
+          <span aria-hidden="true">-&gt;</span>
+        </button>
+        <p>49 eur</p>
+        <p><a href="./legal/futuro-terms.html">terminos</a> / <a href="./legal/futuro-privacy.html">privacidad</a></p>
+      </form>
+
+      <form id="futureAccessForm" class="future-form">
+        <div class="ritual-copy">
+          <p>$ require --mic --silence --stable-connection</p>
+          <p>$ warning --prediction=false --therapy=false --advice=false</p>
+          <p><a href="./legal/futuro-terms.html">terminos</a> / <a href="./legal/futuro-privacy.html">privacidad_retencion</a></p>
+        </div>
+
+        <label class="check-row">
+          <input type="checkbox" name="acceptTerms" required>
+          <span>acepto terminos, privacidad y aviso de IA. entiendo que el sistema procesa voz y transcripcion.</span>
+        </label>
+
+        <label class="check-row">
+          <input type="checkbox" name="acceptIntensity" required>
+          <span>entiendo que puede ser incomodo y que no sustituye terapia, medico, abogado ni banco.</span>
+        </label>
+
+        <button class="future-button" type="submit" id="startPaymentButton">
+          <span>pagar_49_eur</span>
+          <span aria-hidden="true">-&gt;</span>
+        </button>
+      </form>
+
+      <div class="payment-stage" id="paymentStage" hidden>
+        <div class="payment-lines" aria-live="polite">
+          <span data-payment-line="0">gateway // redireccion anulada</span>
+          <span data-payment-line="1">importe detectado // 49 eur</span>
+          <span data-payment-line="2">flag beta // acceso concedido</span>
+        </div>
+        <div class="scan-line" aria-hidden="true"></div>
+      </div>
+
+      <div class="ready-stage" id="readyStage" hidden>
+        <p class="ready-label">accepted</p>
+        <h2>voz preparada.</h2>
+        <p>si hay ruido, responde igual. si mientes, el libro tambien lo hara.</p>
+        <div class="button-stack">
+          <button class="future-button" type="button" id="beginInterviewButton">
+            <span>abrir_microfono</span>
+            <span aria-hidden="true">-&gt;</span>
+          </button>
+          <button class="future-button secondary" type="button" id="resetFlowButton">romper sesion</button>
+        </div>
+      </div>
+
+      <div class="interview-stage" id="interviewStage" hidden>
+        <p class="ready-label" id="questionLabel">q_01 / 21</p>
+        <h2 id="questionText">Como te llamas y que version de ti crees que esta entrando ahora en esta experiencia?</h2>
+        <div class="voice-orb" id="voiceOrb" aria-hidden="true">
+          <span></span>
+        </div>
+        <div class="voice-controls">
+          <button class="future-button secondary" type="button" id="playQuestionButton">repetir</button>
+          <button class="future-button" type="button" id="recordAnswerButton">rec</button>
+          <button class="future-button secondary" type="button" id="stopRecordingButton" hidden>stop</button>
+          <button class="future-button" type="button" id="saveAnswerButton" disabled>guardar</button>
+        </div>
+        <div class="transcript-panel" aria-live="polite">
+          <span>buffer_transcript</span>
+          <p id="liveTranscript">habla. si el navegador falla, quedara audio pendiente.</p>
+        </div>
+        <p class="answer-meta" id="answerMeta">mic pendiente.</p>
+      </div>
+
+      <div class="complete-stage" id="completeStage" hidden>
+        <p class="ready-label">interview_completed</p>
+        <h2>21 respuestas bloqueadas.</h2>
+        <p>la entrevista ha terminado. ahora el nodo puede escribir el manuscrito privado antes del pdf.</p>
+        <div class="button-stack">
+          <button class="future-button" type="button" id="generateBookButton">
+            <span>generar_libro</span>
+            <span aria-hidden="true">-&gt;</span>
+          </button>
+          <button class="future-button secondary" type="button" id="resetCompletedButton">romper sesion</button>
+        </div>
+      </div>
+
+      <div class="book-stage" id="bookStage" hidden>
+        <p class="ready-label">manuscript_ready</p>
+        <h2 id="bookTitle">manuscrito generado.</h2>
+        <p id="bookQuality" class="book-quality">score=n/a / pages=n/a / local</p>
+        <ol class="book-sections" id="bookSections" aria-label="Secciones del libro"></ol>
+        <p id="pdfStatus" class="book-quality">pdf_status=not_generated / lulu_ready=false</p>
+        <div class="button-stack">
+          <button class="future-button" type="button" id="generatePdfButton">
+            <span>generar_pdf</span>
+            <span aria-hidden="true">-&gt;</span>
+          </button>
+          <button class="future-button secondary" type="button" id="downloadPdfButton" hidden>descargar_pdf</button>
+          <a class="future-button secondary" href="./futuro-admin.html">back_office</a>
+          <button class="future-button secondary" type="button" id="resetBookButton">romper sesion</button>
+        </div>
+      </div>
+
+      <p class="technical-note" id="technicalNote" role="status">Inicializando sesion.</p>
+    </section>
+  </main>
+
+  <script type="module" src="./scripts/future-book.js"></script>
+</body>
+</html>

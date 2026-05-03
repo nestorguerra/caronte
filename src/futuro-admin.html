@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co; frame-src 'self' data: blob: https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
+  <title>Futuro Anterior Admin</title>
+  <meta name="description" content="Back office privado para Futuro Anterior.">
+  <link rel="stylesheet" href="./styles/future-admin.css">
+  <script src="./config/env.js"></script>
+</head>
+<body class="future-admin-page">
+  <main class="admin-shell">
+    <header class="admin-header">
+      <div class="admin-title">
+        <p>Futuro Anterior</p>
+        <h1>Back office</h1>
+        <span>Control operativo, proveedores y revision editorial.</span>
+      </div>
+      <a href="./futuro.html">Abrir experiencia</a>
+    </header>
+
+    <section class="admin-gate" id="adminGate">
+      <div class="gate-copy">
+        <p>Acceso privado</p>
+        <h2>Panel de control</h2>
+        <span>Introduce la clave para ver sesiones, cola de libros y configuracion.</span>
+      </div>
+      <form id="adminTokenForm">
+        <div class="auth-grid">
+          <label>
+            <span>Email admin</span>
+            <input id="adminEmailInput" name="adminEmail" type="email" autocomplete="username" placeholder="admin@dominio.com">
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="adminPasswordInput" name="adminPassword" type="password" autocomplete="current-password" placeholder="Password">
+          </label>
+        </div>
+        <label>
+          <span>Token legacy</span>
+          <input id="adminTokenInput" name="adminToken" type="password" autocomplete="off" placeholder="Token">
+        </label>
+        <button type="submit">Entrar</button>
+      </form>
+      <p id="adminMode">Esperando clave</p>
+    </section>
+
+    <section class="admin-workspace" id="adminWorkspace" hidden>
+      <div class="admin-bar">
+        <div>
+          <span>Estado del panel</span>
+          <strong id="adminStatus">Sin sincronizar</strong>
+        </div>
+        <div class="admin-bar-actions">
+          <span id="adminIdentity">Sin operador</span>
+          <button type="button" id="refreshAdminButton">Actualizar</button>
+          <button type="button" id="adminLogoutButton" class="secondary">Salir</button>
+        </div>
+      </div>
+
+      <section class="demo-banner" id="demoBanner" hidden>
+        <strong>Produccion simulada</strong>
+        <span>Datos fake de volumen para ver el back office en plena operacion. No se guardan ni se envian al backend. Usa ?real=1 para ver solo datos reales.</span>
+      </section>
+
+      <section class="ops-overview" aria-label="Resumen operativo">
+        <div class="ops-hero">
+          <span>Operacion Caronte</span>
+          <strong id="opsHeadline">sin datos</strong>
+          <p id="opsSubline">Esperando sincronizacion.</p>
+        </div>
+        <div class="ops-snapshot" id="opsSnapshot"></div>
+      </section>
+
+      <section class="audit-checklist" id="auditChecklist" aria-label="Auditoria de produccion"></section>
+
+      <section class="metrics-grid" id="metricsGrid" aria-label="Metricas"></section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Costes</h2>
+            <span>Estimacion operativa de entrevistas, llamadas IA y entregables.</span>
+          </div>
+        </div>
+        <div class="monitor-grid" id="costGrid"></div>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Seguridad</h2>
+            <span>Rate limits, retos anti-abuso, retencion y solicitudes RGPD.</span>
+          </div>
+        </div>
+        <div class="monitor-grid" id="securityGrid"></div>
+        <div class="security-actions">
+          <button type="button" id="retentionDryRunButton" class="secondary">Simular retencion</button>
+          <button type="button" id="retentionRunButton" class="danger">Ejecutar retencion</button>
+          <form id="privacyOpsForm">
+            <input id="privacySessionInput" name="sessionId" autocomplete="off" placeholder="ID de sesion">
+            <button type="button" data-privacy-export>Export RGPD</button>
+            <button type="button" class="danger" data-privacy-erase>Borrado RGPD</button>
+          </form>
+        </div>
+        <pre id="securityReport" class="security-report">sin reporte</pre>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Observabilidad</h2>
+            <span>Synthetic monitor, SLA, conversion, dead-letter y alertas externas.</span>
+          </div>
+          <div class="panel-actions">
+            <button type="button" id="syntheticRunButton" class="secondary">Synthetic</button>
+            <button type="button" id="autonomousMonitorButton">Monitor autonomo</button>
+          </div>
+        </div>
+        <div class="monitor-grid" id="observabilityGrid"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Creado</th>
+                <th>Sesion</th>
+                <th>Accion</th>
+                <th>Severidad</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="deadLetterBody"></tbody>
+          </table>
+        </div>
+        <pre id="observabilityReport" class="security-report">sin reporte</pre>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Acceso viral</h2>
+            <span>Campanas cerradas, enlaces efimeros, lista de espera y kill-switch.</span>
+          </div>
+        </div>
+        <div class="monitor-grid" id="viralAccessGrid"></div>
+        <form id="accessPolicyForm" class="session-repair-form">
+          <select id="accessModeInput" name="mode" aria-label="Modo de acceso">
+            <option value="fixed_beta">fixed_beta</option>
+            <option value="invite_required">invite_required</option>
+          </select>
+          <input id="accessCampaignCodeInput" name="campaignCode" autocomplete="off" placeholder="campaign_code">
+          <label class="inline-check">
+            <input id="fixedBetaEnabledInput" name="fixedBetaEnabled" type="checkbox">
+            <span>fixed beta</span>
+          </label>
+          <label class="inline-check">
+            <input id="waitlistEnabledInput" name="waitlistEnabled" type="checkbox" checked>
+            <span>waitlist</span>
+          </label>
+          <button type="submit">Guardar modo</button>
+        </form>
+        <form id="accessCampaignForm" class="session-repair-form">
+          <input id="campaignNameInput" name="name" autocomplete="off" placeholder="Nombre campana">
+          <input id="campaignCodeInput" name="code" autocomplete="off" placeholder="codigo">
+          <input id="campaignMaxSessionsInput" name="maxSessions" type="number" min="1" max="100000" value="100" placeholder="sesiones">
+          <input id="campaignTtlInput" name="defaultTtlMinutes" type="number" min="1" max="43200" value="60" placeholder="ttl min">
+          <button type="submit">Crear campana</button>
+        </form>
+        <form id="accessInviteForm" class="session-repair-form">
+          <input id="inviteCampaignIdInput" name="campaignId" autocomplete="off" placeholder="campaign_id">
+          <input id="inviteCountInput" name="count" type="number" min="1" max="50" value="1" placeholder="links">
+          <input id="inviteTtlInput" name="ttlMinutes" type="number" min="1" max="43200" value="60" placeholder="ttl min">
+          <input id="inviteChildLimitInput" name="childInviteLimit" type="number" min="0" max="100" value="0" placeholder="viral cap">
+          <button type="submit">Generar links</button>
+        </form>
+        <pre id="viralInviteOutput" class="security-report">sin enlaces</pre>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Campana</th>
+                <th>Estado</th>
+                <th>Modo</th>
+                <th>Uso</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="accessCampaignBody"></tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Link</th>
+                <th>Campana</th>
+                <th>Estado</th>
+                <th>Uso</th>
+                <th>Caduca</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="accessInviteBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Monitor operativo</h2>
+            <span>Salud del sistema y bloqueos criticos.</span>
+          </div>
+        </div>
+        <div class="monitor-grid" id="monitorGrid"></div>
+        <div class="admin-danger-zone">
+          <button type="button" id="accessToggleButton" class="secondary">Cerrar acceso</button>
+          <form id="deleteSessionForm">
+            <input id="deleteSessionInput" name="sessionId" autocomplete="off" placeholder="ID de sesion">
+            <button type="submit" class="danger">Borrar datos</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>API Keys</h2>
+            <span>Campos write-only para OpenAI, Anthropic, ElevenLabs y futuros proveedores. Las claves nunca se muestran completas.</span>
+          </div>
+        </div>
+        <div class="provider-grid" id="providerGrid"></div>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Sesiones recientes</h2>
+            <span>Ultimas 80 entradas del flujo de entrevista. Abre una para ver timeline y reparar estados.</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Estado</th>
+                <th>Libro</th>
+                <th>PDF</th>
+                <th>Actualizado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="sessionsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Detalle de sesion</h2>
+            <span>Timeline, respuestas, artefactos y reparacion manual sin SQL.</span>
+          </div>
+        </div>
+        <form id="sessionDetailForm" class="session-repair-form">
+          <input id="sessionDetailInput" name="sessionId" autocomplete="off" placeholder="ID completo de sesion">
+          <button type="submit">Abrir</button>
+        </form>
+        <form id="sessionRepairForm" class="session-repair-form">
+          <input id="repairSessionIdInput" name="sessionId" autocomplete="off" placeholder="ID sesion">
+          <select id="repairStatusInput" name="status" aria-label="Estado de sesion">
+            <option value="">Estado</option>
+            <option value="interview_ready">interview_ready</option>
+            <option value="interview_completed">interview_completed</option>
+            <option value="book_ready">book_ready</option>
+            <option value="pending_review">pending_review</option>
+            <option value="blocked">blocked</option>
+            <option value="failed">failed</option>
+          </select>
+          <select id="repairBookStatusInput" name="bookStatus" aria-label="Estado del libro">
+            <option value="">Libro</option>
+            <option value="not_started">not_started</option>
+            <option value="queued">queued</option>
+            <option value="generating">generating</option>
+            <option value="quality_review">quality_review</option>
+            <option value="ready">ready</option>
+            <option value="failed">failed</option>
+          </select>
+          <select id="repairPdfStatusInput" name="pdfReviewStatus" aria-label="Estado PDF">
+            <option value="">PDF</option>
+            <option value="not_generated">not_generated</option>
+            <option value="pending_review">pending_review</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+            <option value="regeneration_requested">regeneration_requested</option>
+            <option value="released_to_customer">released_to_customer</option>
+          </select>
+          <input id="repairReasonInput" name="reason" autocomplete="off" placeholder="Motivo">
+          <label class="inline-check">
+            <input id="repairClearErrorInput" name="clearError" type="checkbox">
+            <span>Limpiar error</span>
+          </label>
+          <button type="submit">Aplicar</button>
+        </form>
+        <div id="sessionDetail" class="session-detail">Sin sesion seleccionada.</div>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Caronte</h2>
+            <span>Mapas psicologicos y versiones literarias generadas.</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Sesion</th>
+                <th>Version</th>
+                <th>Prompt</th>
+                <th>Estado</th>
+                <th>Generado</th>
+              </tr>
+            </thead>
+            <tbody id="caronteBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Cola editorial</h2>
+            <span>Manuscritos generados antes del PDF final.</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Sesion</th>
+                <th>Titulo</th>
+                <th>Estado</th>
+                <th>Calidad</th>
+                <th>Prompt</th>
+                <th>Generado</th>
+              </tr>
+            </thead>
+            <tbody id="manuscriptBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-panel" data-queue="pdf_review_queue">
+        <div class="panel-title">
+          <div>
+            <h2>Revision de PDF</h2>
+            <span>La liberacion al cliente siempre requiere aprobacion manual.</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Archivo</th>
+                <th>Estado</th>
+                <th>Paginas</th>
+                <th>Lulu</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="pdfBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-panel preview-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Previsualizacion</h2>
+            <span id="previewMeta">Sin PDF seleccionado</span>
+          </div>
+        </div>
+        <iframe id="pdfPreview" title="PDF preview"></iframe>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Auditoria</h2>
+            <span>Lecturas privilegiadas, cambios de estado y acciones editoriales.</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Operador</th>
+                <th>Rol</th>
+                <th>Accion</th>
+                <th>Recurso</th>
+              </tr>
+            </thead>
+            <tbody id="adminAuditBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script type="module" src="./scripts/future-admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LicitIA - Confirmando email</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../styles/app.css">
+  <script src="../config/env.js"></script>
+</head>
+<body>
+  <main class="auth-page">
+    <section class="brand-panel" aria-label="LicitIA">
+      <div class="brand-mark">
+        <span class="brand-icon">L</span>
+        <span>LicitIA</span>
+      </div>
+      <div class="brand-copy">
+        <div class="eyebrow">Confirmacion segura</div>
+        <h1>Estamos activando tu cuenta.</h1>
+        <p>Si el enlace es correcto, entraras en LicitIA automaticamente para terminar las 7 preguntas iniciales.</p>
+      </div>
+      <div class="brand-facts" aria-label="Estado">
+        <div class="fact">
+          <strong>Email</strong>
+          <span>verificacion de cuenta</span>
+        </div>
+        <div class="fact">
+          <strong>7</strong>
+          <span>preguntas de arranque</span>
+        </div>
+        <div class="fact">
+          <strong>0 EUR</strong>
+          <span>beta gratuita</span>
+        </div>
+      </div>
+    </section>
+    <section class="work-panel">
+      <div class="auth-shell">
+        <div class="shell-top">
+          <div>
+            <h2>Confirmando email</h2>
+            <p id="confirmStatus">Un momento, estamos validando el enlace.</p>
+          </div>
+          <span class="status-pill">LicitIA</span>
+        </div>
+        <div class="notice" id="confirmNotice">No cierres esta ventana.</div>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="../scripts/auth-confirm.js"></script>
+</body>
+</html>

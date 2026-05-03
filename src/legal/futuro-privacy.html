@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co; frame-src 'self' data: blob: https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
+  <title>Futuro Anterior - Privacidad</title>
+  <link rel="stylesheet" href="../styles/future-book.css">
+</head>
+<body class="future-page">
+  <main class="future-shell">
+    <section class="future-hero" aria-labelledby="privacyTitle">
+      <div class="future-brand">
+        <span class="future-sigil">fa</span>
+        <span>privacy_node</span>
+      </div>
+      <div class="future-copy">
+        <p class="future-kicker">version beta-2026-04 / privacy</p>
+        <h1 id="privacyTitle">privacidad y retencion.</h1>
+        <p>si hablas, el sistema necesita guardar parte de lo que dices. aqui esta escrito sin rodeos.</p>
+      </div>
+      <div class="future-footnote">
+        <span>voice / transcript / pdf</span>
+        <span><a href="../futuro.html">volver_gate</a></span>
+      </div>
+    </section>
+
+    <section class="future-console legal-console" aria-label="Privacidad Futuro Anterior">
+      <div class="console-header">
+        <div>
+          <p class="console-step">legal 02/02</p>
+          <h2>datos tratados</h2>
+        </div>
+        <div class="price-mark">private</div>
+      </div>
+      <div class="legal-copy">
+        <h3>que datos se tratan</h3>
+        <p>Identificador de sesion, token publico, consentimiento, estado de pago simulado, voz capturada por el navegador, transcripcion, respuestas a las 21 preguntas, manuscrito, PDF, eventos tecnicos, estado de revision y decisiones de back office.</p>
+
+        <h3>proveedores</h3>
+        <p>Subencargados tecnicos previstos: Supabase para backend, base de datos y storage privado; ElevenLabs para sintesis de voz; OpenAI para transcripcion y redaccion; Anthropic para revision editorial; proveedor de pago en EUR cuando se active checkout real; Lulu para impresion y envio cuando se active fulfillment. En esta beta no se llama a Lulu ni a la pasarela real.</p>
+
+        <h3>finalidad</h3>
+        <p>Crear tu libro, generar el PDF, revisar calidad, bloquear el envio hasta aprobacion interna, detectar errores P0 y operar la beta privada.</p>
+
+        <h3>retencion</h3>
+        <p>Retencion operativa actual: audio hasta 7 dias; respuestas, mapas, manuscritos y PDFs hasta 30 dias; eventos tecnicos hasta 90 dias; auditoria admin hasta 365 dias con minimizacion posterior. El sistema tiene politicas de TTL y accion de retencion para purgar datos caducados.</p>
+
+        <h3>borrado</h3>
+        <p>Tienes derecho de exportacion y derecho de borrado. Puedes pedir borrado operativo indicando tu identificador de sesion o el contexto suficiente para localizarla. El back office incluye export RGPD, borrado de sesion y limpieza de storage privado asociado.</p>
+
+        <h3>seguridad</h3>
+        <p>Las claves de proveedores no se exponen en el navegador. El PDF no se libera al cliente hasta aprobacion manual. Se guardan senales anti-abuso en formato hash, no la IP cruda. El hosting preparado para produccion incluye CSP, bloqueo de iframes, politica de permisos y referrer minimo.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

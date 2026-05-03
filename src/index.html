@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LicitIA - Acceso y onboarding</title>
+  <link rel="icon" href="./favicon.svg?v=20260502" type="image/svg+xml">
+  <link rel="shortcut icon" href="./favicon.svg?v=20260502" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles/app.css">
+  <script src="./config/env.js"></script>
+</head>
+<body>
+  <main class="auth-page">
+    <section class="brand-panel" aria-label="LicitIA">
+      <div class="brand-mark">
+        <span class="brand-icon">L</span>
+        <span>LicitIA</span>
+      </div>
+      <div class="brand-copy">
+        <div class="eyebrow">Beta gratuita para equipos de licitaciones</div>
+        <h1>Entra y empieza a buscar licitaciones oficiales en minutos.</h1>
+        <p>Crea tu cuenta, confirma el email y responde 7 preguntas para activar tu workspace beta. Sin tarjeta este primer mes.</p>
+      </div>
+    </section>
+
+    <section class="work-panel">
+      <div class="auth-shell" id="authShell">
+        <div class="shell-top">
+          <div>
+            <h2>Entrar en LicitIA</h2>
+            <p>Si es tu primera vez, crea la cuenta, confirma el correo y vuelve aqui para terminar el onboarding.</p>
+          </div>
+          <span class="status-pill" id="backendStatus">Comprobando backend</span>
+        </div>
+
+        <div class="tabs tabs-three" role="tablist" aria-label="Acceso">
+          <button type="button" class="is-active" data-auth-tab="login">Login</button>
+          <button type="button" data-auth-tab="register">Crear cuenta</button>
+          <button type="button" data-auth-tab="recover">Recuperar</button>
+        </div>
+
+        <form id="loginForm" class="form-grid" data-auth-panel="login">
+          <label>Email
+            <input name="email" type="email" autocomplete="email" required>
+          </label>
+          <label>Contrasena
+            <input name="password" type="password" autocomplete="current-password" minlength="8" required>
+          </label>
+          <div class="form-footer">
+            <button type="submit" class="primary-button">Entrar</button>
+            <span class="free-pill">Beta gratuita activa</span>
+          </div>
+        </form>
+
+        <form id="registerForm" class="form-grid" data-auth-panel="register" hidden>
+          <label>Nombre
+            <input name="fullName" type="text" autocomplete="name" required>
+          </label>
+          <label>Email corporativo
+            <input name="email" type="email" autocomplete="email" required>
+          </label>
+          <label>Contrasena
+            <input name="password" type="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <p class="small-copy">Te enviaremos un correo de LicitIA para confirmar la cuenta. Despues activarás tu workspace con 7 preguntas antes de entrar al cockpit.</p>
+          <div class="form-footer">
+            <button type="submit" class="primary-button">Crear cuenta</button>
+            <span class="free-pill">Sin pago inicial</span>
+          </div>
+        </form>
+
+        <form id="recoverForm" class="form-grid" data-auth-panel="recover" hidden>
+          <label>Email de la cuenta
+            <input name="email" type="email" autocomplete="email" required>
+          </label>
+          <div class="form-footer">
+            <button type="submit" class="primary-button">Enviar enlace</button>
+          </div>
+        </form>
+
+        <div class="notice" id="authNotice" hidden></div>
+      </div>
+
+      <div class="onboarding-shell onboarding-wide" id="onboardingShell" hidden>
+        <div class="shell-top">
+          <div>
+            <h2>7 preguntas y empiezas</h2>
+            <p>Cuenta activa: <strong id="onboardingUserEmail"></strong>. Solo pedimos lo minimo para crear tu primera busqueda y activar alertas.</p>
+          </div>
+          <button type="button" class="secondary-button" id="logoutButton">Salir</button>
+        </div>
+
+        <form id="quickOnboardingForm" class="form-grid quick-onboarding" data-onboarding-step="1">
+          <div class="form-grid two-col">
+            <label><span>1. Empresa</span>
+              <input name="organizationName" type="text" autocomplete="organization" required>
+            </label>
+            <label><span>2. CIF/NIF</span>
+              <input name="taxId" type="text" inputmode="text" autocomplete="off">
+            </label>
+          </div>
+          <label><span>3. Sector principal</span>
+            <input name="sector" type="text" placeholder="Consultoria IT, limpieza, energia..." required>
+          </label>
+          <label><span>4. Que vendes a la Administracion</span>
+            <textarea name="servicesDescription" placeholder="Describe en una frase tus servicios, suministros u obras." required></textarea>
+          </label>
+          <label><span>5. CPV o palabras clave objetivo</span>
+            <input name="targetSignal" type="text" placeholder="72000000, software, mantenimiento, limpieza..." required>
+          </label>
+          <label><span>6. Donde quieres competir</span>
+            <input name="regions" type="text" placeholder="Madrid, estatal, Euskadi..." required>
+          </label>
+          <fieldset class="compact-fieldset">
+            <legend>7. Importe objetivo</legend>
+            <div class="form-grid two-col">
+              <label>Minimo EUR
+                <input name="amountMin" type="number" min="0" placeholder="10000">
+              </label>
+              <label>Maximo EUR
+                <input name="amountMax" type="number" min="0" placeholder="250000">
+              </label>
+            </div>
+          </fieldset>
+          <div class="free-box">
+            <strong>Plan Beta gratuita - primer mes</strong>
+            <p id="freePlanCopy">Durante el primer mes LicitIA es gratuita. No tienes que introducir tarjeta ni metodo de pago. Te avisaremos antes de activar cualquier plan de pago.</p>
+          </div>
+          <label class="checkbox-line">
+            <input name="acceptLegal" type="checkbox" required>
+            <span>Acepto los <a href="./legal/terms.html" target="_blank" rel="noreferrer">terminos beta</a>, la <a href="./legal/privacy.html" target="_blank" rel="noreferrer">politica de privacidad</a> y el <a href="./legal/ai-notice.html" target="_blank" rel="noreferrer">aviso de uso de IA</a>.</span>
+          </label>
+          <label class="checkbox-line">
+            <input name="communicationsConsent" type="checkbox">
+            <span>Acepto comunicaciones operativas sobre alertas, onboarding y uso de la beta.</span>
+          </label>
+          <div class="notice" id="freePlanMessage" hidden></div>
+          <div class="form-footer">
+            <button type="submit" class="primary-button">Empezar a trabajar</button>
+            <span class="free-pill">Sin pasarela de pago</span>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="./scripts/main.js"></script>
+</body>
+</html>

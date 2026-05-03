@@ -1,0 +1,93 @@
+project_id = "licitia-production"
+
+[auth]
+site_url = "https://nestorguerra.github.io/licitia-v2-production/"
+additional_redirect_urls = [
+  "https://nestorguerra.github.io/licitia-v2-production/**",
+  "http://127.0.0.1:8765/**",
+  "http://localhost:8765/**"
+]
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+double_confirm_changes = true
+secure_password_change = true
+
+[auth.email.template.confirmation]
+subject = "Activa tu cuenta en LicitIA"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "Recupera tu acceso a LicitIA"
+content_path = "./supabase/templates/recovery.html"
+
+[functions.health]
+verify_jwt = false
+
+[functions.create-organization]
+verify_jwt = false
+
+[functions.complete-onboarding]
+verify_jwt = false
+
+[functions.onboarding-state]
+verify_jwt = false
+
+[functions.update-company-profile]
+verify_jwt = false
+
+[functions.audit-event]
+verify_jwt = false
+
+[functions.ingest-boe]
+verify_jwt = false
+
+[functions.ingest-placsp]
+verify_jwt = false
+
+[functions.search-tenders]
+verify_jwt = false
+
+[functions.tender-detail]
+verify_jwt = false
+
+[functions.track-tender]
+verify_jwt = false
+
+[functions.decision-score]
+verify_jwt = false
+
+[functions.analyze-tender]
+verify_jwt = false
+
+[functions.workflow-tender]
+verify_jwt = false
+
+[functions.system-health]
+verify_jwt = false
+
+[functions.proposal-copilot]
+verify_jwt = false
+
+[functions.proposal-review]
+verify_jwt = false
+
+[functions.competitive-intel]
+verify_jwt = false
+
+[functions.document-dossier]
+verify_jwt = false
+
+[functions.ops-admin]
+verify_jwt = false
+
+[functions.observability-event]
+verify_jwt = false
+
+[functions.run-alerts]
+verify_jwt = false
+
+[functions.future-book-session]
+verify_jwt = false

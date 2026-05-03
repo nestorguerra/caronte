@@ -1,0 +1,13 @@
+.DS_Store
+Thumbs.db
+node_modules/
+dist/
+src/config/env.js
+.env
+.env.*
+!.env.example
+*.log
+*.zip
+__MACOSX/
+coverage/
+supabase/.temp/

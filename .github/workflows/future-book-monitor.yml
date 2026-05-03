@@ -1,0 +1,49 @@
+name: Futuro Anterior Autonomous Monitor
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    env:
+      FUNCTIONS_BASE_URL: ${{ vars.FUNCTIONS_BASE_URL }}
+      INGESTION_SECRET: ${{ secrets.INGESTION_SECRET }}
+    steps:
+      - name: Check monitor configuration
+        run: |
+          test -n "$FUNCTIONS_BASE_URL"
+          test -n "$INGESTION_SECRET"
+
+      - name: Prepare function caller
+        run: |
+          cat > /tmp/call-future-book.sh <<'SH'
+          set -euo pipefail
+          payload="$1"
+          response="$(mktemp)"
+          status="$(curl --show-error --silent --output "$response" --write-out "%{http_code}" \
+            -X POST "$FUNCTIONS_BASE_URL/future-book-session" \
+            -H "content-type: application/json" \
+            -H "x-licitia-job-secret: $INGESTION_SECRET" \
+            -d "$payload")"
+          cat "$response"
+          echo
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "future-book-session failed with HTTP $status" >&2
+            exit 1
+          fi
+          SH
+          chmod +x /tmp/call-future-book.sh
+
+      - name: Run autonomous monitor
+        run: |
+          /tmp/call-future-book.sh '{"action":"runAutonomousMonitor"}'
+
+      - name: Run synthetic monitor
+        run: |
+          /tmp/call-future-book.sh '{"action":"runSyntheticMonitor"}'
