@@ -17,7 +17,7 @@ function includes(text, snippets, label) {
 
 const fn = await file('supabase/functions/future-book-session/index.ts');
 const migration = await file('supabase/migrations/202604220009_future_book_sprint15_ephemeral_access.sql');
-const bookHtml = await file('src/futuro.html');
+const bookHtml = await file('src/tiresias.html');
 const bookJs = await file('src/scripts/future-book.js');
 const adminHtml = await file('src/futuro-admin.html');
 const adminJs = await file('src/scripts/future-admin.js');

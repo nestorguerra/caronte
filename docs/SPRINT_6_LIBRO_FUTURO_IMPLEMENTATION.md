@@ -19,7 +19,7 @@ Paginas nuevas:
 - `src/legal/futuro-terms.html`
 - `src/legal/futuro-privacy.html`
 
-La pantalla publica `src/futuro.html` enlaza ambos documentos antes de aceptar terminos.
+La pantalla publica `src/tiresias.html` enlaza ambos documentos antes de aceptar terminos.
 
 Cobertura:
 

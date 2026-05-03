@@ -12,7 +12,7 @@ const buildScript = await readFile(path.join(root, 'scripts/build.mjs'), 'utf8')
 const runbook = await readFile(path.join(root, 'docs/RUNBOOK_OPERATIVO.md'), 'utf8');
 const compliance = await readFile(path.join(root, 'docs/MATRIZ_CUMPLIMIENTO.md'), 'utf8');
 
-for (const snippet of ['Caronte', './futuro.html', './futuro-admin.html']) {
+for (const snippet of ['Caronte', './tiresias.html', './futuro-admin.html']) {
   if (!corporate.includes(snippet)) throw new Error(`Caronte landing missing ${snippet}`);
 }
 if (!corporate.includes('modelo autonomo para entrevista, mapa psicologico, manuscrito privado y PDF final')) {

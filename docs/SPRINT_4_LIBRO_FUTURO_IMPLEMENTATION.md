@@ -45,7 +45,7 @@ Convertir la entrevista completa de 21 preguntas en un manuscrito privado, estru
 
 ### Frontend
 
-- `src/futuro.html`
+- `src/tiresias.html`
   - Boton `generar_libro`.
   - Pantalla `manuscript_ready`.
   - Listado de secciones del manuscrito.

@@ -14,7 +14,7 @@ const requiredFiles = [
   'src/scripts/auth-confirm.js',
   'src/scripts/auth-flow.js',
   'src/config/env.template.js',
-  'src/futuro.html',
+  'src/tiresias.html',
   'src/futuro-admin.html',
   'src/styles/future-book.css',
   'src/styles/future-admin.css',
@@ -170,7 +170,7 @@ if (!index.includes('quickOnboardingForm') || !index.includes('7 preguntas') || 
 }
 
 const corporateIndex = await readFile(path.join(root, 'index.html'), 'utf8');
-for (const snippet of ['Caronte', './futuro.html', './futuro-admin.html', 'backend=supabase_edge_functions']) {
+for (const snippet of ['Caronte', './tiresias.html', './futuro-admin.html', 'backend=supabase_edge_functions']) {
   if (!corporateIndex.includes(snippet)) throw new Error(`Caronte landing missing ${snippet}`);
 }
 if (!corporateIndex.includes('modelo autonomo para entrevista, mapa psicologico, manuscrito privado y PDF final')) {

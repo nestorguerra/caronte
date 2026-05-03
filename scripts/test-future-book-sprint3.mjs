@@ -15,7 +15,7 @@ function includes(text, snippets, label) {
   }
 }
 
-const page = await file('src/futuro.html');
+const page = await file('src/tiresias.html');
 const js = await file('src/scripts/future-book.js');
 const fn = await file('supabase/functions/future-book-session/index.ts');
 const sprint = await file('docs/SPRINT_3_LIBRO_FUTURO_IMPLEMENTATION.md');

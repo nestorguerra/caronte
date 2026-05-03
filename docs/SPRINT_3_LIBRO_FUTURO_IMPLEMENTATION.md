@@ -16,7 +16,7 @@ Sprint 3 convierte la primera prueba de voz en una entrevista completa:
 
 ## Archivos principales
 
-- `src/futuro.html`
+- `src/tiresias.html`
 - `src/scripts/future-book.js`
 - `src/styles/future-book.css`
 - `supabase/functions/future-book-session/index.ts`
@@ -94,7 +94,7 @@ python3 -m http.server 8765 --directory dist --bind 127.0.0.1
 Abrir:
 
 ```text
-http://127.0.0.1:8765/futuro.html
+http://127.0.0.1:8765/tiresias.html
 ```
 
 Flujo esperado:

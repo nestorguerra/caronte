@@ -2,7 +2,7 @@
 
 ## Producto
 
-- [ ] URL fija `/futuro.html` accesible.
+- [ ] URL fija `/tiresias.html` accesible.
 - [ ] Precio visible: 49 EUR.
 - [ ] Pago simulado desbloquea entrevista.
 - [ ] Aviso emocional visible antes de iniciar.

@@ -3,7 +3,7 @@
 Producto autonomo para entrevista privada, generacion de manuscrito y PDF final.
 
 - Produccion: https://nestorguerra.github.io/caronte/
-- Experiencia cliente: https://nestorguerra.github.io/caronte/futuro.html
+- Experiencia cliente: https://nestorguerra.github.io/caronte/tiresias.html
 - Back office: https://nestorguerra.github.io/caronte/futuro-admin.html
 - Backend: Supabase Edge Function `future-book-session`
 
@@ -41,7 +41,7 @@ npm run serve
 URLs locales:
 
 - http://127.0.0.1:8765/
-- http://127.0.0.1:8765/futuro.html
+- http://127.0.0.1:8765/tiresias.html
 - http://127.0.0.1:8765/futuro-admin.html
 
 ## Contratos de produccion implementados

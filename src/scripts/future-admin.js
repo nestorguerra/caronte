@@ -731,7 +731,7 @@ async function localAdminAction(action, payload = {}) {
     return { ok: true, campaign: { id: crypto.randomUUID(), code: payload.code || 'local', name: payload.name || 'local', status: 'active', accessMode: 'invite_required', maxSessions: payload.maxSessions || 100, usedSessions: 0 } };
   }
   if (action === 'adminCreateAccessInvites') {
-    const link = new URL('./futuro.html', window.location.href);
+    const link = new URL('./tiresias.html', window.location.href);
     link.searchParams.set('k', `local_${crypto.randomUUID().replaceAll('-', '')}`);
     return { ok: true, invites: [{ token: link.searchParams.get('k'), link: link.toString(), invite: { status: 'active', tokenHint: 'local' } }] };
   }
@@ -1619,7 +1619,7 @@ async function handleAccessCampaignSubmit(event) {
 
 async function handleAccessInviteSubmit(event) {
   event.preventDefault();
-  const baseUrl = new URL('./futuro.html', window.location.href).toString();
+  const baseUrl = new URL('./tiresias.html', window.location.href).toString();
   const result = await adminAction('adminCreateAccessInvites', {
     campaignId: inviteCampaignIdInput?.value?.trim() || '',
     count: Number(inviteCountInput?.value || 1),

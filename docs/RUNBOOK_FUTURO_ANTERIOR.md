@@ -2,7 +2,7 @@
 
 ## Acceso
 
-- Producto: `/futuro.html`.
+- Producto: `/tiresias.html`.
 - Back office: `/futuro-admin.html`.
 - En produccion configura `FUTURE_BOOK_ADMIN_TOKEN`.
 - Si no hay backend configurado, el back office usa modo local con datos de `sessionStorage`.
@@ -124,7 +124,7 @@ Acciones:
 El panel `Acceso viral` gobierna la entrada real al sistema.
 
 - `fixed_beta`: la URL fija sigue creando sesiones. Usar solo para pruebas internas.
-- `invite_required`: solo entran enlaces `futuro.html?k=...` activos.
+- `invite_required`: solo entran enlaces `tiresias.html?k=...` activos.
 - `fixed beta`: excepcion temporal para mantener pruebas internas aunque el modo sea cerrado.
 - `waitlist`: si un link falla, se guarda una entrada opaca sin datos crudos.
 

@@ -20,7 +20,7 @@ Sprint 3 extendera esto a las 21 preguntas completas.
 
 ## Archivos principales
 
-- `src/futuro.html`
+- `src/tiresias.html`
 - `src/styles/future-book.css`
 - `src/scripts/future-book.js`
 - `supabase/functions/future-book-session/index.ts`
@@ -98,7 +98,7 @@ Al guardar respuesta:
 - La respuesta queda guardada en backend o modo local.
 - No se introduce campo de texto libre para responder.
 - Tests estaticos Sprint 2 incluidos en `npm test`.
-- Build genera la experiencia completa en `dist/futuro.html`.
+- Build genera la experiencia completa en `dist/tiresias.html`.
 
 ## Prueba manual recomendada
 
@@ -110,7 +110,7 @@ python3 -m http.server 8765 --directory dist --bind 127.0.0.1
 Abrir:
 
 ```text
-http://127.0.0.1:8765/futuro.html
+http://127.0.0.1:8765/tiresias.html
 ```
 
 Flujo esperado:

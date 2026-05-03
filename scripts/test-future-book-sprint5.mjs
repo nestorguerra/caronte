@@ -15,7 +15,7 @@ function includes(text, snippets, label) {
   }
 }
 
-const page = await file('src/futuro.html');
+const page = await file('src/tiresias.html');
 const adminPage = await file('src/futuro-admin.html');
 const clientJs = await file('src/scripts/future-book.js');
 const adminJs = await file('src/scripts/future-admin.js');

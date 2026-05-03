@@ -6,7 +6,7 @@ Pasar de una URL fija de beta a un acceso cerrado, medible y apagable: campanas 
 
 ## PB cubiertos
 
-- **PB-I01 Generador de enlaces efimeros**: `adminCreateAccessInvites` crea links `futuro.html?k=...` y solo devuelve el token una vez.
+- **PB-I01 Generador de enlaces efimeros**: `adminCreateAccessInvites` crea links `tiresias.html?k=...` y solo devuelve el token una vez.
 - **PB-I02 TTL de enlace**: cada invite tiene `expires_at`; el backend marca como `expired` si llega tarde.
 - **PB-I03 Un solo uso**: `consumeAccessInvite()` actualiza `use_count` y cierra el link cuando llega a `max_uses`.
 - **PB-I04 Invitaciones limitadas**: campanas con `max_invites`, `max_sessions` y `child_invite_limit`.

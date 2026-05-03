@@ -4701,7 +4701,7 @@ function campaignCode(value: unknown) {
 }
 
 function accessLink(baseUrl: unknown, token: string) {
-  const fallback = 'https://nestorguerra.github.io/licitia-v2-production/futuro.html';
+  const fallback = 'https://nestorguerra.github.io/caronte/tiresias.html';
   const raw = safeLongText(baseUrl, fallback, 800) || fallback;
   try {
     const url = new URL(raw);

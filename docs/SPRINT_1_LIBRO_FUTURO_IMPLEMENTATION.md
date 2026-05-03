@@ -9,7 +9,7 @@ Alcance: PB-A02, PB-A03, PB-A04, PB-B02 y PB-G03 del backlog `PRODUCT_BACKLOG_LI
 Sprint 1 deja una URL fija funcional:
 
 ```text
-/futuro.html
+/tiresias.html
 ```
 
 El usuario puede:
@@ -23,7 +23,7 @@ El usuario puede:
 
 ## Archivos principales
 
-- `src/futuro.html`
+- `src/tiresias.html`
 - `src/styles/future-book.css`
 - `src/scripts/future-book.js`
 - `supabase/functions/future-book-session/index.ts`
@@ -32,7 +32,7 @@ El usuario puede:
 ## Decisiones de experiencia
 
 - La pagina no se integra en la navegacion publica de LicitIA para no mezclar productos.
-- La URL fija del MVP es directa: `/futuro.html`.
+- La URL fija del MVP es directa: `/tiresias.html`.
 - El precio visible es `49 EUR`.
 - El copy evita prometer prediccion literal.
 - El pago es simulado y queda preparado para sustituirse por pasarela real.
@@ -72,14 +72,14 @@ Sprint 2 conectara voz, microfono y preguntas. Sprint 1 termina justo antes de l
 
 ## Definition of Done Sprint 1
 
-- URL fija `futuro.html` creada.
+- URL fija `tiresias.html` creada.
 - Pantalla oscura y opaca implementada.
 - Precio `49 EUR` visible.
 - Consentimiento y aviso emocional obligatorios.
 - Pago simulado implementado en frontend y backend.
 - Sesion queda en `interview_ready`.
 - Tests estaticos Sprint 1 incluidos en `npm test`.
-- Build genera `dist/futuro.html`.
+- Build genera `dist/tiresias.html`.
 
 ## Prueba manual recomendada
 
@@ -91,7 +91,7 @@ python3 -m http.server 8765 --directory dist --bind 127.0.0.1
 Abrir:
 
 ```text
-http://127.0.0.1:8765/futuro.html
+http://127.0.0.1:8765/tiresias.html
 ```
 
 Flujo esperado:

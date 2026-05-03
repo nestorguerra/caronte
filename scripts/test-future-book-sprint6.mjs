@@ -77,7 +77,7 @@ function runE2ESimulation() {
   assert(pdf.luluMetadata.send_to_lulu === false, 'E2E must not send to Lulu');
 }
 
-const futuro = await file('src/futuro.html');
+const futuro = await file('src/tiresias.html');
 const adminPage = await file('src/futuro-admin.html');
 const terms = await file('src/legal/futuro-terms.html');
 const privacy = await file('src/legal/futuro-privacy.html');

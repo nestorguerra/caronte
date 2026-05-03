@@ -91,7 +91,7 @@ Tablas:
 
 Archivos:
 
-- `src/futuro.html`
+- `src/tiresias.html`
 - `src/scripts/future-book.js`
 - `src/styles/future-book.css`
 
