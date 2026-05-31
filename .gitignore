@@ -11,3 +11,4 @@ src/config/env.js
 __MACOSX/
 coverage/
 supabase/.temp/
+scripts/voice-previews/

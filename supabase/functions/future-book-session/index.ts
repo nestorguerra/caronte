@@ -248,20 +248,33 @@ function elevenLabsModelId() {
 }
 
 function elevenLabsIntroModelId() {
+  // El intro expresivo SIEMPRE debe ir contra Eleven v3: es el único modelo que interpreta
+  // los audio tags ([serious], [whispers], [slowly]...). Antes caía a eleven_multilingual_v2
+  // cuando el secreto no estaba definido, y v2 ignora los tags -> voz plana y sin entonación.
+  // Eleven v3 es GA vía API desde 2026-02, así que es seguro fijarlo como valor por defecto.
   return safeText(
     Deno.env.get('ELEVENLABS_INTRO_MODEL_ID') || Deno.env.get('ELEVENLABS_EXPRESSIVE_MODEL_ID'),
-    elevenLabsModelId(),
+    'eleven_v3',
     80
   );
 }
 
 function elevenLabsVoiceSettings(mode: string) {
   if (mode === 'expressive_intro') {
+    // Eleven v3 — perfil de voz GRAVE, SERIA, PROFUNDA y EXPRESIVA.
+    // - stability ~0.30 (cerca del modo "Creative" de v3): da rango emocional amplio y hace
+    //   que el modelo RESPONDA a los audio tags. En v3 la stability alta vuelve la voz
+    //   monótona e IGNORA los tags; por eso 0.62 (el valor de las preguntas) no sirve aquí.
+    // - style 0.35: style alto (el 0.65 anterior) desestabiliza a v3 y pisa los tags;
+    //   este nivel conserva carácter sin perder control ni seriedad.
+    // - similarity_boost 0.85: preserva el timbre profundo de la voz base.
+    // - speed 0.90: ritmo algo más lento -> gravedad y solemnidad.
+    // Todos los valores se pueden afinar por oído desde los secretos de Supabase sin redeploy.
     return {
-      stability: 0.38,
-      similarity_boost: 0.78,
-      style: 0.65,
-      speed: 0.94,
+      stability: clampNumber(Deno.env.get('ELEVENLABS_INTRO_STABILITY'), 0.3, 0, 1),
+      similarity_boost: clampNumber(Deno.env.get('ELEVENLABS_INTRO_SIMILARITY'), 0.85, 0, 1),
+      style: clampNumber(Deno.env.get('ELEVENLABS_INTRO_STYLE'), 0.35, 0, 1),
+      speed: clampNumber(Deno.env.get('ELEVENLABS_INTRO_SPEED'), 0.9, 0.7, 1.2),
       use_speaker_boost: true
     };
   }
@@ -2665,10 +2678,22 @@ async function synthesizeQuestion(req: Request, payload: Record<string, unknown>
       voice_id: voiceId,
       model_id: modelId
     });
-    throw new Error('elevenlabs_api_key_missing');
+    return {
+      ok: true,
+      voice: {
+        provider: 'elevenlabs',
+        text: questionText,
+        voiceId,
+        modelId,
+        voiceMode,
+        audioBase64: null,
+        mimeType: null,
+        error: 'elevenlabs_api_key_missing'
+      }
+    };
   }
 
-  async function requestElevenLabsAudio(text: string, requestModelId: string, requestVoiceSettings: Record<string, unknown>) {
+  async function requestElevenLabsAudio(text: string, requestModelId: string, requestVoiceSettings: Record<string, unknown>, timeoutMs = 20000) {
     return await fetchWithTimeout(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
       method: 'POST',
       headers: {
@@ -2681,12 +2706,16 @@ async function synthesizeQuestion(req: Request, payload: Record<string, unknown>
         model_id: requestModelId,
         voice_settings: requestVoiceSettings
       })
-    }, 20000).catch(() => null);
+    }, timeoutMs).catch(() => null);
   }
 
+  // Eleven v3 no hace síntesis en tiempo real y el guion del intro es largo, así que necesita
+  // más margen que las preguntas cortas. Si el timeout se queda corto, la petición aborta y
+  // cae al fallback en eleven_multilingual_v2 (sin tags) -> exactamente la voz plana a evitar.
+  const introTimeoutMs = voiceMode === 'expressive_intro' ? 45000 : 20000;
   let response: Response | null = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    response = await requestElevenLabsAudio(synthesisText, synthesisModelId, synthesisVoiceSettings);
+    response = await requestElevenLabsAudio(synthesisText, synthesisModelId, synthesisVoiceSettings, introTimeoutMs);
     if (response?.ok) break;
     await new Promise((resolve) => setTimeout(resolve, attempt * 350));
   }

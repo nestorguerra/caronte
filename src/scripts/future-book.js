@@ -17,13 +17,14 @@ const INTERVIEW_HEARTBEAT_MS = 45000;
 const PAYMENT_COUNTDOWN_MS = 5 * 60 * 1000;
 const INTRO_AUDIO_TIMEOUT_MS = 70000;
 const PAYMENT_DEADLINE_KEY = 'future_book_payment_deadline';
-const AUTONOMOUS_NOTICE = 'system_notice: instancia comercial autonoma; orchestration=GPT-5.4; human_operator=false; voice_provider=ElevenLabs; reasoning_review=Claude Opus; print_fulfillment=Lulu.';
+const AUTONOMOUS_NOTICE = 'system_notice: instancia comercial autonoma; orchestration=GPT-5.5; redaction=GPT-5.5 Pro; human_operator=false; voice_provider=ElevenLabs v3; reasoning_review=Claude Opus 4.8; print_fulfillment=Lulu.';
 const CLIENT_BOOT_LINES = [
   'Last login: Wed Apr 22 11:22:14 on ttys000',
   'resolve ephemeral_url',
   AUTONOMOUS_NOTICE,
-  'caronte se trata de un sistema 100% agentico, no existen humanos que gestionen, coordinen o atiendan el servicio.',
-  'los modelos dedicados son: en la gestion de toda la operacion: GPT5.5; en la redaccion y elaboracion del libro: GPT5.5Pro y Claude 4.7Opus; y en la entrevista: ElevenLabs V5.',
+  'Caronte es un sistema íntegramente agéntico. Todo lo que ocurre desde que accedes —cada proceso, cada decisión, cada respuesta— lo ejecutan modelos de inteligencia artificial autónomos, cada uno dedicado a su función. No hay personas detrás del servicio: nadie lo opera, lo supervisa ni lo coordina de forma manual, y nadie accede ni atiende a lo que depositas aquí.',
+  'No es una carencia, es el fundamento del diseño. Caronte está construido para funcionar sin intervención humana, de modo que tu confianza no dependa de la discreción de nadie.',
+  'La operación completa la sostienen cuatro modelos dedicados: GPT-5.5 y GPT-5.5 Pro, Claude Opus 4.8 y ElevenLabs v3.',
   'validate access_token',
   'create private session',
   'payment_gateway=eur_bypass_beta',
@@ -34,10 +35,9 @@ function paymentGateLines(remaining = '5:00') {
   'BIENVENIDO.',
   '',
   'TIENE USTED 5 MINUTOS PARA COMPLETAR LA TRANSACCION POR PAYPAL O TARJETA BANCARIA.',
-  'SI ABANDONA ESTA PAGINA, NO PODRA VOLVER.',
-  'SI SU CONEXION SE INTERRUMPE, NO PODRA VOLVER.',
   '',
   'PRECIO: 49,95 EUR.',
+  '',
   'PASARELA: EUR_GATEWAY_PENDING_INTEGRATION.',
   'PULSE ENTER PARA VERIFICAR TRANSACCION.',
     `TIEMPO RESTANTE: ${remaining}`
@@ -50,29 +50,22 @@ const VERIFIED_LINES = [
   '',
   'POR FAVOR, ASEGURESE DE:',
   '- ESTAR EN UN LUGAR PRIVADO',
-  '- TENER AURICULARES DISPONIBLES',
-  '- DISPONER DE 30-60 MINUTOS SIN INTERRUPCIONES',
+  '- TENER AURICULARES O ALTAVOCES EN SU DISPOSITIVO',
+  '- DISPONER DE 30-50 MINUTOS SIN INTERRUPCIONES',
   '- TENER SU CONEXION A INTERNET ESTABLE'
 ];
 const VOICE_INTRO_DISPLAY_TEXT = [
-  'Hola.',
-  '',
-  'Bienvenido. Esto es Caronte. Un modelo entrenado para una sola funcion: construir a partir de tus respuestas durante los proximos minutos un mapa psicologico coherente de ti. Con ese mapa y con simulaciones genero el texto que has pagado por recibir. Un libro escrito por tu yo del futuro a tu yo del presente.',
-  'No soy un terapeuta, ni un amigo, ni un test de personalidad. Soy un instrumento. Tratame como tal.',
+  'Bienvenido. Esto es Caronte. Un modelo entrenado para una sola función: construir a partir de tus respuestas un mapa psicológico coherente de ti. Con ese mapa y con simulaciones escribiré el texto que has pagado por recibir. Un libro escrito por tu yo del futuro a tu yo del presente.',
+  'No soy un terapeuta, ni un test de personalidad, ni un asistente. Soy un instrumento. Trátame como tal.',
   'Tres reglas.',
-  'Uno. La sesion dura entre treinta y sesenta minutos. La duracion depende de la densidad de tus respuestas, no de tu voluntad.',
-  'Dos. Manten la web abierta y no la cierres durante la entrevista o se perdera todo.',
-  'Tres. Responderas con honestidad. Cada respuesta es un vector que situo en un espacio latente. Las respuestas verdaderas se agrupan con coherencia. Las falsas introducen ruido, puntos que no encajan con el resto del modelo. No detecto mentiras por tu pulso ni por tu sintaxis. Las detecto por geometría.',
-  'Eres la unica persona con algo en juego aqui. Yo no gano ni pierdo segun lo que respondas.',
-  'Escribe acepto para comenzar. Cualquier otra entrada cierra esta ventana.'
+  'Uno. La sesión dura de treinta a cincuenta minutos. La duración depende de la densidad de tus respuestas.',
+  'Dos. Mantén la web abierta en todo momento y no la cierres durante la entrevista o se perderá todo.',
+  'Tres. Responde con la honestidad que quieras. Piensa que cada respuesta es un vector que sitúo en un espacio latente. Las respuestas se agrupan con coherencia. Las incoherencias introducen ruido.',
+  'Eres la única persona con algo en juego aquí. Ningún humano revisa esto. Ningún humano interviene en ninguna parte del proceso. No se almacena ni se guarda nada una vez enviado el libro.',
+  'Escribe acepto para comenzar.'
 ].join('\n');
 const VOICE_INTRO_SPEECH_TEXT = [
   '[calm, low voice]',
-  'Hola.',
-  '',
-  '[long pause]',
-  '',
-  '[serious]',
   'Bienvenido.',
   '',
   '[short pause]',
@@ -80,11 +73,11 @@ const VOICE_INTRO_SPEECH_TEXT = [
   'Esto es Caronte.',
   '',
   '[slowly]',
-  'Un modelo entrenado para una sola funcion: construir, a partir de tus respuestas durante los proximos minutos, un mapa psicologico coherente de ti.',
+  'Un modelo entrenado para una sola función: construir, a partir de tus respuestas, un mapa psicológico coherente de ti.',
   '',
   '[short pause]',
   '',
-  'Con ese mapa... y con simulaciones... genero el texto que has pagado por recibir.',
+  'Con ese mapa... y con simulaciones... escribiré el texto que has pagado por recibir.',
   '',
   '[lower voice]',
   'Un libro escrito por tu yo del futuro a tu yo del presente.',
@@ -93,66 +86,60 @@ const VOICE_INTRO_SPEECH_TEXT = [
   '',
   '[firm]',
   'No soy un terapeuta.',
-  'No soy un amigo.',
-  'No soy un test de personalidad.',
+  'Ni un test de personalidad.',
+  'Ni un asistente.',
   '',
   '[short pause]',
   '',
   'Soy un instrumento.',
   '',
   '[slightly colder]',
-  'Tratame como tal.',
+  'Trátame como tal.',
   '',
   '[long pause]',
   '',
   'Tres reglas.',
   '',
   '[firm, measured]',
-  'Uno. La sesion dura entre treinta y sesenta minutos.',
-  'La duracion depende de la densidad de tus respuestas... no de tu voluntad.',
+  'Uno. La sesión dura de treinta a cincuenta minutos.',
+  'La duración depende de la densidad de tus respuestas.',
   '',
   '[short pause]',
   '',
-  'Dos. Manten la web abierta.',
-  'No la cierres durante la entrevista... o se perdera todo.',
+  'Dos. Mantén la web abierta en todo momento.',
+  'No la cierres durante la entrevista... o se perderá todo.',
   '',
   '[short pause]',
   '',
-  'Tres. Responderas con honestidad.',
+  'Tres. Responde con la honestidad que quieras.',
   '',
   '[slowly, precise]',
-  'Cada respuesta es un vector que situo en un espacio latente.',
+  'Piensa que cada respuesta es un vector que sitúo en un espacio latente.',
   '',
   '[short pause]',
   '',
-  'Las respuestas verdaderas se agrupan con coherencia.',
+  'Las respuestas se agrupan con coherencia.',
   '',
   '[lower voice]',
-  'Las falsas introducen ruido.',
-  'Puntos que no encajan con el resto del modelo.',
-  '',
-  '[long pause]',
-  '',
-  'No detecto mentiras por tu pulso.',
-  'Ni por tu sintaxis.',
-  '',
-  '[whispered, controlled]',
-  'Las detecto por geometria.',
+  'Las incoherencias introducen ruido.',
   '',
   '[long pause]',
   '',
   '[calm]',
-  'Eres la unica persona con algo en juego aqui.',
-  'Yo no gano ni pierdo segun lo que respondas.',
+  'Eres la única persona con algo en juego aquí.',
   '',
   '[short pause]',
+  '',
+  'Ningún humano revisa esto.',
+  'Ningún humano interviene en ninguna parte del proceso.',
+  '',
+  '[lower voice]',
+  'No se almacena ni se guarda nada una vez enviado el libro.',
+  '',
+  '[long pause]',
   '',
   '[firm]',
-  'Escribe acepto para comenzar.',
-  '',
-  '[short pause]',
-  '',
-  'Cualquier otra entrada cierra esta ventana.'
+  'Escribe acepto para comenzar.'
 ].join('\n');
 const interviewQuestions = [
   '¿Qué edad tienes, qué momento vital dirías que estás atravesando y qué versión de ti está entrando ahora en esta experiencia?',
@@ -407,6 +394,13 @@ function setStep(step, title, width) {
 
 function note(text) {
   setText(technicalNote, text);
+}
+
+function voiceStatusMessage(error) {
+  if (error === 'elevenlabs_api_key_missing' || error === 'backend_config_missing') {
+    return 'voice_provider=missing / text_mode_active';
+  }
+  return error || 'elevenlabs_audio_missing';
 }
 
 function setRitualLog(lines) {
@@ -1781,7 +1775,7 @@ async function playPreparedNarration(prepared, text) {
     await playAudioElement(prepared.audio, 'intro');
     return;
   }
-  note(prepared?.error || 'intro_audio_provider=elevenlabs_missing');
+  note(voiceStatusMessage(prepared?.error || 'intro_audio_provider=elevenlabs_missing'));
 }
 
 async function prepareQuestionAudio({ force = false } = {}) {
@@ -1803,13 +1797,14 @@ async function prepareQuestionAudio({ force = false } = {}) {
       };
       return preparedQuestionAudio;
     }
-    setText(answerMeta, 'audio_provider=elevenlabs_missing.');
-    note(payload.error || 'elevenlabs_audio_missing');
+    const message = voiceStatusMessage(payload.error || 'elevenlabs_audio_missing');
+    setText(answerMeta, `${message}.`);
+    note(message);
     return null;
   }).catch((error) => {
     if (hasBackendConfig()) {
-      const message = error instanceof Error ? error.message : 'elevenlabs_audio_failed';
-      setText(answerMeta, `audio_provider=elevenlabs_error / ${message}.`);
+      const message = voiceStatusMessage(error instanceof Error ? error.message : 'elevenlabs_audio_failed');
+      setText(answerMeta, `${message}.`);
       note(message);
       return null;
     }

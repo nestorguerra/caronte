@@ -46,7 +46,7 @@ includes(js, [
   'navigator.mediaDevices.getUserMedia',
   'MediaRecorder',
   'elevenlabs_audio_missing',
-  'audio_provider=elevenlabs_error',
+  'voice_provider=missing / text_mode_active',
   'SpeechRecognition',
   'webkitSpeechRecognition',
   'startInterview',
