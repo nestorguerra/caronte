@@ -1,4 +1,4 @@
-import { callFunction } from './api-client.js';
+import { callFunction } from './api-client.js?v=20260903-demo-recovery';
 import { hasBackendConfig } from './config.js';
 
 const DEMO_MODE = new URLSearchParams(window.location.search).get('demo') === '1';
