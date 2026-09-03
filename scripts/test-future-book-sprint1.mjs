@@ -18,6 +18,7 @@ function includes(text, snippets, label) {
 const page = await file('src/tiresias.html');
 const css = await file('src/styles/future-book.css');
 const js = await file('src/scripts/future-book.js');
+const apiClient = await file('src/scripts/api-client.js');
 const fn = await file('supabase/functions/future-book-session/index.ts');
 const sprint = await file('docs/SPRINT_1_LIBRO_FUTURO_IMPLEMENTATION.md');
 const pkg = await file('package.json');
@@ -28,6 +29,9 @@ includes(page, [
   'futureAccessForm',
   'paymentStage',
   'readyStage',
+  'quickDemoButton',
+  'data-demo-voice',
+  'storage.googleapis.com',
   'acceptIntensity',
   './scripts/future-book.js'
 ], 'Future book Sprint 1 page');
@@ -48,9 +52,27 @@ includes(js, [
   'startSimulatedPayment',
   'approveSimulatedPayment',
   'hasBackendConfig',
+  "currentSession?.mode === 'local'",
+  'ENTRY_REQUEST_TIMEOUT_MS',
+  'backend_unavailable / local_mode_active',
+  'DEMO_MODE',
+  'seedDemoBook',
+  'DEMO_VOICE_PREVIEW_URL',
+  'playDemoVoicePreview',
   'sessionStorage',
   'showReady'
 ], 'Future book Sprint 1 frontend');
+
+includes(apiClient, [
+  'timeoutMs = 0',
+  'new AbortController()',
+  'controller.abort()',
+  "throw new Error(`${name}_timeout`)"
+], 'Future book Sprint 1 network resilience');
+
+if (js.includes("note('ios_audio_unlock")) {
+  throw new Error('Audio unlock state must not overwrite entry errors');
+}
 
 includes(fn, [
   'recordConsent',
