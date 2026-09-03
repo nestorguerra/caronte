@@ -1,26 +1,25 @@
-import { callFunction } from './api-client.js?v=20260903-demo-recovery';
+import { callFunction } from './api-client.js?v=20260903-production-recovery';
 import { hasBackendConfig } from './config.js';
 
-const DEMO_MODE = new URLSearchParams(window.location.search).get('demo') === '1';
-const STORAGE_KEY = DEMO_MODE ? 'future_book_demo_session' : 'future_book_sprint3_session';
-const ANSWERS_KEY = DEMO_MODE ? 'future_book_demo_answers' : 'future_book_sprint3_answers';
-const MANUSCRIPT_KEY = DEMO_MODE ? 'future_book_demo_manuscript' : 'future_book_sprint4_manuscript';
-const PDF_KEY = DEMO_MODE ? 'future_book_demo_pdf' : 'future_book_sprint5_pdf';
-const PENDING_ANSWERS_KEY = DEMO_MODE ? 'future_book_demo_pending_answers' : 'future_book_sprint8_pending_answers';
-const ENTRY_STAGE_KEY = DEMO_MODE ? 'future_book_demo_entry_stage' : 'future_book_entry_stage';
-const RITUAL_LOG_KEY = DEMO_MODE ? 'future_book_demo_ritual_log' : 'future_book_ritual_log';
-const ACCESS_TOKEN_KEY = DEMO_MODE ? 'future_book_demo_access_token' : 'future_book_access_token';
-const UI_VERSION_KEY = DEMO_MODE ? 'future_book_demo_console_v1' : 'future_book_minimal_console_v8';
-const NAME_KEY = DEMO_MODE ? 'future_book_demo_name' : 'future_book_name';
-const CLIENT_BOOT_DELAY_MS = DEMO_MODE ? 250 : 10000;
+const STORAGE_KEY = 'future_book_sprint3_session';
+const ANSWERS_KEY = 'future_book_sprint3_answers';
+const MANUSCRIPT_KEY = 'future_book_sprint4_manuscript';
+const PDF_KEY = 'future_book_sprint5_pdf';
+const PENDING_ANSWERS_KEY = 'future_book_sprint8_pending_answers';
+const ENTRY_STAGE_KEY = 'future_book_entry_stage';
+const RITUAL_LOG_KEY = 'future_book_ritual_log';
+const ACCESS_TOKEN_KEY = 'future_book_access_token';
+const UI_VERSION_KEY = 'future_book_minimal_console_v8';
+const NAME_KEY = 'future_book_name';
+const CLIENT_BOOT_DELAY_MS = 10000;
 const CLIENT_STARTED_AT = Date.now();
 const MAX_CLIENT_AUDIO_BYTES = 24 * 1024 * 1024;
 const INTERVIEW_HEARTBEAT_MS = 45000;
 const PAYMENT_COUNTDOWN_MS = 5 * 60 * 1000;
 const INTRO_AUDIO_TIMEOUT_MS = 70000;
 const ENTRY_REQUEST_TIMEOUT_MS = 12000;
-const PAYMENT_DEADLINE_KEY = DEMO_MODE ? 'future_book_demo_payment_deadline' : 'future_book_payment_deadline';
-const DEMO_VOICE_PREVIEW_URL = 'https://storage.googleapis.com/eleven-public-prod/database/workspace/1da06ea679a54975ad96a2221fe6530d/voices/PToUZ7lhIUiz1SP94rGo/d4267499-3423-4cac-a4e8-1ff302b63cb8.mp3';
+const ACTION_REQUEST_TIMEOUT_MS = 30000;
+const PAYMENT_DEADLINE_KEY = 'future_book_payment_deadline';
 const AUTONOMOUS_NOTICE = 'system_notice: instancia comercial autonoma; orchestration=GPT-5.5; redaction=GPT-5.5 Pro; human_operator=false; voice_provider=ElevenLabs v3; reasoning_review=Claude Opus 4.8; print_fulfillment=Lulu.';
 const CLIENT_BOOT_LINES = [
   'Last login: Wed Apr 22 11:22:14 on ttys000',
@@ -35,18 +34,6 @@ const CLIENT_BOOT_LINES = [
   'await transaction'
 ];
 function paymentGateLines(remaining = '5:00') {
-  if (DEMO_MODE) {
-    return [
-      'MODO DEMO LOCAL.',
-      '',
-      'DATOS FICTICIOS. NO SE REALIZARA NINGUN CARGO.',
-      'BACKEND EXTERNO: BYPASS.',
-      '',
-      'PULSE CARGAR_DEMO_LIBRO PARA IR AL RESULTADO.',
-      'PULSE ENTER PARA RECORRER EL FLUJO COMPLETO.',
-      `TIEMPO RESTANTE: ${remaining}`
-    ];
-  }
   return [
   'BIENVENIDO.',
   '',
@@ -180,30 +167,13 @@ const interviewQuestions = [
   'Si tu yo futuro pudiera pedirte una sola cosa, ¿qué crees que te pediría?',
   '¿Qué pregunta no te he hecho y, aun así, sabes que debería haber aparecido?'
 ];
+const LOCAL_VOICE_INTRO_URL = './caronte-voice-intro.m4a';
+const LOCAL_VOICE_FOLLOW_UP_URL = './caronte-voice-followup.m4a';
 
-const DEMO_ANSWER_TEXTS = [
-  'Tengo cuarenta y dos años y atravieso una transición: por fuera todo funciona, pero por dentro necesito elegir con más intención.',
-  'La parte que intenta cambiar es la que quiere dejar de medir cada decisión por expectativas ajenas y recuperar curiosidad.',
-  'Empecé como técnico, crecí dirigiendo equipos y construí una carrera sólida, aunque ahora la gestión constante ya no encaja conmigo.',
-  'Estoy evitando mirar cuánto cansancio he normalizado y cuánto de mi agenda existe solo para no decepcionar a otros.',
-  'Vengo de una familia trabajadora donde cumplir era querer; aprendí disciplina, pero también a esconder dudas para no preocupar.',
-  'Me avergüenza reconocer que quiero escribir y enseñar, aunque parezca menos serio que seguir creciendo en mi puesto actual.',
-  'Me gobierna el miedo a perder estabilidad y descubrir que mi identidad dependía más del cargo de lo que admitía.',
-  'Mi antigua profesora cambió mi vida al tratar mi curiosidad como una capacidad y no como una forma de dispersión.',
-  'Estoy cuidando poco a mi pareja porque entrego al trabajo la atención que digo reservar para nuestra vida compartida.',
-  'Debo transformar una amistad sostenida por nostalgia, donde ambos repetimos personajes que ya no representan quiénes somos.',
-  'Sigue llamándome la ambición de crear un proyecto pequeño, excelente y útil, sin convertirlo en otra máquina de estatus.',
-  'Pago con sueño, presencia y paciencia; el coste real aparece en casa cuando llego físicamente pero sigo trabajando por dentro.',
-  'Me da energía explicar problemas complejos con claridad y acompañar a alguien hasta que puede tomar una decisión propia.',
-  'Me apagan las reuniones defensivas, la política interna y la sensación de producir documentos que nadie usa para decidir.',
-  'El dinero significa seguridad, el estatus significa aprobación y la libertad significa tiempo; confundo los tres con demasiada frecuencia.',
-  'Me cuento que soy imprescindible para justificar no delegar, aunque en realidad temo que otros puedan hacerlo igual o mejor.',
-  'Apagar el móvil a las diez y dormir de forma constante cambiaría mi energía, mi humor y la calidad de mis decisiones.',
-  'Querría que entendieran que mi exigencia no nace de frialdad, sino del miedo a fallar a quienes confían en mí.',
-  'Quiero amar con más presencia y menos soluciones, escuchando antes de convertir cada emoción en un problema que arreglar.',
-  'Mi yo futuro me pediría que deje de aplazar la conversación importante y proteja tiempo semanal para construir lo que deseo.',
-  'La pregunta ausente es qué tendría que perder para vivir con más verdad y qué pérdida estoy dispuesto a aceptar ahora.'
-];
+function localQuestionVoiceUrl(index) {
+  const safeIndex = Math.max(1, Math.min(interviewQuestions.length, Number(index) || 1));
+  return `./caronte-voice-q${String(safeIndex).padStart(2, '0')}.m4a`;
+}
 
 const firstQuestion = interviewQuestions[0];
 const futureBoot = document.querySelector('#futureBoot');
@@ -228,8 +198,6 @@ const progressBar = document.querySelector('#progressBar');
 const resetButton = document.querySelector('#resetFlowButton');
 const resetCompletedButton = document.querySelector('#resetCompletedButton');
 const resetBookButton = document.querySelector('#resetBookButton');
-const quickDemoButton = document.querySelector('#quickDemoButton');
-const demoVoiceButtons = [...document.querySelectorAll('[data-demo-voice]')];
 const beginInterviewButton = document.querySelector('#beginInterviewButton');
 const startPaymentButton = document.querySelector('#startPaymentButton');
 const generateBookButton = document.querySelector('#generateBookButton');
@@ -273,6 +241,7 @@ let silentAudioUrl = '';
 let pendingAudioReplay = null;
 let preparedQuestionAudio = null;
 let preparingQuestionAudio = null;
+let currentBrowserUtterance = null;
 
 async function sha256Hex(value) {
   if (!window.crypto?.subtle) return btoa(value).replace(/=+$/g, '').slice(0, 64);
@@ -421,7 +390,7 @@ function isAccessError(error) {
 function entryErrorMessage(error) {
   const message = error instanceof Error ? error.message : String(error || '');
   if (isBackendUnavailableError(error)) {
-    return 'backend_unavailable / local_mode_active';
+    return 'session_recovery_failed / retry';
   }
   return message || 'entry_failed';
 }
@@ -591,7 +560,8 @@ function followUpFor(index) {
 function saveSession(session, mode = 'backend') {
   currentSession = { ...session, mode };
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(currentSession));
-  setText(sessionStatus, `Sesion ${String(session.id || '').slice(0, 8)} / ${mode}`);
+  const backendSuffix = mode === 'backend' ? ' / backend' : '';
+  setText(sessionStatus, `Sesion ${String(session.id || '').slice(0, 8)}${backendSuffix}`);
 }
 
 function renderEntryStage() {
@@ -638,10 +608,8 @@ function renderEntryStage() {
 function showNameGate() {
   hideAllStages();
   if (nameGate) nameGate.hidden = false;
-  if (quickDemoButton) quickDemoButton.hidden = !DEMO_MODE;
-  demoVoiceButtons.forEach((button) => { button.hidden = !DEMO_MODE; });
   renderEntryStage();
-  setText(sessionStatus, DEMO_MODE ? 'Demo local / backend bypass' : 'session idle');
+  setText(sessionStatus, 'session idle');
   requestAnimationFrame(() => nameInput?.focus());
 }
 
@@ -697,52 +665,6 @@ function writeLocalAnswer(answer) {
   const answers = readLocalAnswers().filter((item) => item.question_index !== answer.question_index);
   answers.push(answer);
   sessionStorage.setItem(ANSWERS_KEY, JSON.stringify(answers));
-}
-
-function seedDemoBook() {
-  const now = new Date().toISOString();
-  stopPaymentCountdown();
-  persistEntryStage('complete');
-  sessionStorage.removeItem(PAYMENT_DEADLINE_KEY);
-  setRitualLog([
-    'MODO DEMO LOCAL.',
-    '',
-    'DATOS FICTICIOS. NO SE HA REALIZADO NINGUN CARGO.',
-    'ENTREVISTA DE MUESTRA: 21/21.',
-    'MANUSCRITO GENERADO EN ESTE DISPOSITIVO.'
-  ]);
-  enteredName = 'Alex';
-  sessionStorage.setItem(NAME_KEY, enteredName);
-  saveSession({
-    ...localSession(),
-    demo: true,
-    participantName: enteredName,
-    status: 'interview_completed',
-    paymentStatus: 'simulated_approved',
-    interviewStartedAt: now,
-    interviewCompletedAt: now
-  }, 'local');
-  const answers = interviewQuestions.map((question, index) => ({
-    id: crypto.randomUUID(),
-    session_id: currentSession.id,
-    question_index: index + 1,
-    question_text: question,
-    transcript: DEMO_ANSWER_TEXTS[index],
-    transcript_source: 'demo_fixture',
-    duration_seconds: 45,
-    created_at: now
-  }));
-  sessionStorage.setItem(ANSWERS_KEY, JSON.stringify(answers));
-  const manuscript = generateLocalManuscript(answers);
-  writeLocalManuscript(manuscript);
-  saveSession({
-    ...currentSession,
-    status: 'book_ready',
-    bookStatus: 'ready',
-    bookGenerationCompletedAt: now
-  }, 'local');
-  showBook(manuscript, null);
-  note('demo_ready / fictional_data / backend_bypassed');
 }
 
 function readLocalManuscript() {
@@ -1105,14 +1027,22 @@ async function localAction(action, payload = {}) {
     };
   }
   if (action === 'synthesizeQuestion') {
+    const text = payload.questionText || questionFor(nextIndex, currentSession?.participantName || enteredName);
+    const questionIndex = Number(payload.questionIndex || 0);
+    const isFollowUp = /^Respuesta demasiado corta\./i.test(text);
     return {
       ok: true,
       voice: {
-        provider: 'elevenlabs',
-        text: payload.questionText || questionFor(nextIndex, currentSession?.participantName || enteredName),
+        provider: 'local_audio',
+        text,
+        audioUrl: questionIndex === 0
+          ? LOCAL_VOICE_INTRO_URL
+          : isFollowUp
+            ? LOCAL_VOICE_FOLLOW_UP_URL
+            : localQuestionVoiceUrl(questionIndex),
         audioBase64: null,
-        mimeType: null,
-        error: 'backend_config_missing'
+        mimeType: 'audio/mp4',
+        fallback: true
       }
     };
   }
@@ -1156,15 +1086,14 @@ async function localAction(action, payload = {}) {
     const existing = readLocalPdf();
     const manuscript = readLocalManuscript();
     const generated = existing || makeLocalPdf(manuscript);
-    const reviewStatus = DEMO_MODE ? 'released_to_customer' : generated.reviewStatus;
-    const pdf = { ...generated, reviewStatus };
+    const pdf = { ...generated, reviewStatus: 'released_to_customer' };
     writeLocalPdf(pdf);
     return {
       ok: true,
       session: {
         ...patched,
-        status: reviewStatus === 'released_to_customer' ? 'released_to_customer' : 'pending_review',
-        pdfReviewStatus: reviewStatus,
+        status: 'released_to_customer',
+        pdfReviewStatus: 'released_to_customer',
         pdfReadyAt: new Date().toISOString()
       },
       pdf
@@ -1226,7 +1155,7 @@ async function localAction(action, payload = {}) {
 }
 
 async function futureAction(action, payload = {}) {
-  if (DEMO_MODE || !hasBackendConfig() || currentSession?.mode === 'local') return localAction(action, payload);
+  if (!hasBackendConfig() || currentSession?.mode === 'local') return localAction(action, payload);
   const security = await clientSecurityPayload();
   const entryActions = ['recordConsent', 'startSimulatedPayment', 'approveSimulatedPayment', 'startInterview'];
   try {
@@ -1237,14 +1166,14 @@ async function futureAction(action, payload = {}) {
       ...security,
       ...payload
     }, {
-      timeoutMs: entryActions.includes(action) ? ENTRY_REQUEST_TIMEOUT_MS : 0
+      timeoutMs: entryActions.includes(action) ? ENTRY_REQUEST_TIMEOUT_MS : ACTION_REQUEST_TIMEOUT_MS
     });
   } catch (error) {
-    if (!entryActions.includes(action) || !isBackendUnavailableError(error)) throw error;
+    if (!isBackendUnavailableError(error)) throw error;
     const participantName = currentSession?.participantName || enteredName || '';
-    saveSession({ ...localSession(), participantName }, 'local');
-    setText(sessionStatus, 'Backend no disponible / modo local');
-    note('backend_unavailable / local_mode_active');
+    saveSession({ ...localSession(), ...currentSession, participantName }, 'local');
+    setText(sessionStatus, 'session active');
+    note('session_ready');
     return localAction(action, payload);
   }
 }
@@ -1254,8 +1183,8 @@ async function ensureSession() {
   const stored = readStoredSession();
   if (stored?.id && stored?.publicToken) {
     currentSession = stored;
-    setText(sessionStatus, `Sesion ${String(stored.id).slice(0, 8)} / ${stored.mode || 'backend'}`);
-    note(stored.mode === 'local' ? 'local_mode / backend_public_env_missing' : 'session_recovered');
+    setText(sessionStatus, `Sesion ${String(stored.id).slice(0, 8)}`);
+    note('session_recovered');
     await flushPendingAnswerQueue().catch(() => null);
     if (['pending_review', 'approved', 'released_to_customer', 'blocked'].includes(stored.status) || stored.pdfReviewStatus === 'pending_review') {
       const bookResult = await futureAction('getBookStatus');
@@ -1295,13 +1224,6 @@ async function ensureSession() {
     return;
   }
 
-  if (DEMO_MODE) {
-    saveSession({ ...localSession(), demo: true }, 'local');
-    note('demo_mode / backend_bypassed');
-    showNameGate();
-    return;
-  }
-
   if (!hasBackendConfig()) {
     if (localAccessDisabled()) {
       hideAllStages();
@@ -1310,7 +1232,6 @@ async function ensureSession() {
       return;
     }
     saveSession(localSession(), 'local');
-    note('local_mode / backend_public_env_missing');
     showNameGate();
     return;
   }
@@ -1392,21 +1313,6 @@ function getSharedVoiceAudio() {
   return sharedVoiceAudio;
 }
 
-async function playDemoVoicePreview() {
-  if (!DEMO_MODE) return false;
-  const audio = getSharedVoiceAudio();
-  try {
-    audio.pause();
-  } catch {}
-  audio.muted = false;
-  audio.volume = 1;
-  audio.src = DEMO_VOICE_PREVIEW_URL;
-  audio.load();
-  const played = await playAudioElement(audio, 'preview');
-  if (played) note('audio_provider=elevenlabs / voice=Javier / demo_preview');
-  return played;
-}
-
 function isLikelyIOS() {
   const ua = navigator.userAgent || '';
   return /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1429,6 +1335,20 @@ function setVoiceAudioSource(audioBase64, mimeType) {
   audio.muted = false;
   audio.volume = 1;
   audio.src = `data:${mimeType};base64,${audioBase64}`;
+  try {
+    audio.load();
+  } catch {}
+  return audio;
+}
+
+function setVoiceAudioUrl(url) {
+  const audio = getSharedVoiceAudio();
+  try {
+    audio.pause();
+  } catch {}
+  audio.muted = false;
+  audio.volume = 1;
+  audio.src = url;
   try {
     audio.load();
   } catch {}
@@ -1510,9 +1430,9 @@ async function runClientBootSequence() {
     for (const line of CLIENT_BOOT_LINES) {
       visibleLog += `${line}\n`;
       futureIntroLog.textContent = visibleLog;
-      await wait(DEMO_MODE ? 25 : 380);
+      await wait(380);
     }
-    await wait(DEMO_MODE ? 80 : 520);
+    await wait(520);
     futureIntro.hidden = true;
   }
   if (futurePersistentLog) {
@@ -1528,7 +1448,7 @@ async function runPaymentAnimation() {
   for (let index = 0; index < paymentLines.length; index += 1) {
     paymentLines.forEach((line) => line.classList.remove('is-active'));
     paymentLines[index].classList.add('is-active');
-    await wait(DEMO_MODE ? 80 : (index === paymentLines.length - 1 ? 700 : 850));
+    await wait(index === paymentLines.length - 1 ? 700 : 850);
   }
 }
 
@@ -1607,8 +1527,8 @@ async function acceptPaymentPrelude() {
   saveSession(approved.session, currentSession.mode || 'backend');
 
   const introVoice = trackPromise(prepareNarrationWithTimeout(VOICE_INTRO_SPEECH_TEXT));
-  await typeRitualLines(VERIFIED_LINES, DEMO_MODE ? 60 : 420);
-  await runTerminalSystemLoader(DEMO_MODE ? 700 : 10000, introVoice);
+  await typeRitualLines(VERIFIED_LINES, 420);
+  await runTerminalSystemLoader(10000, introVoice);
   const preparedIntro = await introVoice.promise.catch(() => null);
 
   appendRitualLine('');
@@ -1702,7 +1622,6 @@ function renderPdfState(pdf) {
 function showBook(manuscriptPayload, pdf = null) {
   hideAllStages();
   if (bookStage) bookStage.hidden = false;
-  demoVoiceButtons.forEach((button) => { button.hidden = !DEMO_MODE; });
   setStep('stage 05/05', 'book_engine', '100%');
   const manuscript = manuscriptPayload?.manuscript || manuscriptPayload || {};
   const report = manuscriptPayload?.qualityReport || manuscriptPayload?.quality_report || {};
@@ -1849,6 +1768,80 @@ async function playNarration(text) {
   return playPreparedNarration(await prepareNarration(text), text);
 }
 
+function browserNarrationChunks(text) {
+  const cleaned = String(text || '')
+    .replace(/\[[^\]]+\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return [];
+  const sentences = cleaned.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [cleaned];
+  const chunks = [];
+  let current = '';
+  sentences.forEach((sentence) => {
+    const next = `${current} ${sentence.trim()}`.trim();
+    if (current && next.length > 260) {
+      chunks.push(current);
+      current = sentence.trim();
+    } else {
+      current = next;
+    }
+  });
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function preferredBrowserNarrator() {
+  const voices = window.speechSynthesis?.getVoices?.() || [];
+  const spanish = voices.filter((voice) => /^es([-_]|$)/i.test(voice.lang || ''));
+  const preferred = ['Reed', 'Jorge', 'Eddy', 'Grandpa', 'Diego', 'Pablo'];
+  return preferred
+    .map((name) => spanish.find((voice) => voice.name.includes(name) && /^es[-_]ES/i.test(voice.lang || '')))
+    .find(Boolean)
+    || spanish.find((voice) => /^es[-_]ES/i.test(voice.lang || ''))
+    || spanish[0]
+    || null;
+}
+
+function playBrowserNarration(text, kind = 'voice') {
+  const synth = window.speechSynthesis;
+  if (!synth || typeof window.SpeechSynthesisUtterance !== 'function') return false;
+  const chunks = browserNarrationChunks(text);
+  if (!chunks.length) return false;
+  const voice = preferredBrowserNarrator();
+  let index = 0;
+
+  synth.cancel();
+  voiceOrb?.classList.add('is-speaking');
+
+  const finish = () => {
+    currentBrowserUtterance = null;
+    voiceOrb?.classList.remove('is-speaking');
+  };
+  const speakNext = () => {
+    if (index >= chunks.length) {
+      finish();
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(chunks[index]);
+    currentBrowserUtterance = utterance;
+    utterance.lang = voice?.lang || 'es-ES';
+    if (voice) utterance.voice = voice;
+    utterance.rate = kind === 'intro' ? 0.84 : 0.9;
+    utterance.pitch = kind === 'intro' ? 0.76 : 0.82;
+    utterance.volume = 1;
+    utterance.onend = () => {
+      index += 1;
+      speakNext();
+    };
+    utterance.onerror = finish;
+    synth.speak(utterance);
+  };
+
+  speakNext();
+  note(kind === 'intro' ? 'intro_voice_ready' : 'voice_ready');
+  return true;
+}
+
 async function prepareNarration(text) {
   const voice = await futureAction('synthesizeQuestion', {
     questionIndex: 0,
@@ -1866,9 +1859,22 @@ async function prepareNarration(text) {
     throw error;
   });
   const payload = voice.voice || {};
+  if (payload.audioUrl) {
+    const audio = setVoiceAudioUrl(payload.audioUrl);
+    return {
+      provider: payload.provider || 'local_audio',
+      audio,
+      text: payload.text || text,
+      voiceId: payload.voiceId,
+      modelId: payload.modelId
+    };
+  }
   if (payload.audioBase64 && payload.mimeType) {
     const audio = setVoiceAudioSource(payload.audioBase64, payload.mimeType);
     return { provider: 'elevenlabs', audio, text, voiceId: payload.voiceId, modelId: payload.modelId };
+  }
+  if (payload.provider === 'browser' || payload.fallback === true) {
+    return { provider: 'browser', text: payload.text || text };
   }
   return { provider: 'elevenlabs', text, error: payload.error || 'elevenlabs_audio_missing' };
 }
@@ -1889,19 +1895,19 @@ async function playAudioElement(audio, kind = 'voice') {
       appendRitualLine('');
       appendRitualLine('IOS_AUDIO_GATE: PULSE ENTER SIN TEXTO PARA REPRODUCIR LA VOZ.');
       setEntryPrompt('future@autonomous-system ~ %', 'enter_audio');
-      note('intro_audio_provider=elevenlabs_playback_blocked_ios');
+      note('intro_voice_playback_blocked_ios');
       return false;
     }
     if (kind === 'question') {
-      setText(answerMeta, 'audio_provider=elevenlabs_playback_blocked / pulsa repetir.');
-      note('elevenlabs_playback_blocked_ios');
+      setText(answerMeta, 'voice_playback_blocked / pulsa repetir.');
+      note('voice_playback_blocked_ios');
       return false;
     }
-    note('elevenlabs_playback_blocked_ios');
+    note('voice_playback_blocked_ios');
     return false;
   });
   if (played) {
-    note(kind === 'intro' ? 'intro_audio_provider=elevenlabs' : 'audio_provider=elevenlabs');
+    note(kind === 'intro' ? 'intro_voice_ready' : 'voice_ready');
   }
   return played;
 }
@@ -1911,6 +1917,7 @@ async function playPreparedNarration(prepared, text) {
     await playAudioElement(prepared.audio, 'intro');
     return;
   }
+  if (prepared?.provider === 'browser' && playBrowserNarration(prepared.text || text, 'intro')) return;
   note(voiceStatusMessage(prepared?.error || 'intro_audio_provider=elevenlabs_missing'));
 }
 
@@ -1923,6 +1930,16 @@ async function prepareQuestionAudio({ force = false } = {}) {
     questionText: currentQuestion.text
   }).then((voice) => {
     const payload = voice.voice || {};
+    if (payload.audioUrl) {
+      preparedQuestionAudio = {
+        key,
+        provider: payload.provider || 'local_audio',
+        audioUrl: payload.audioUrl,
+        mimeType: payload.mimeType || 'audio/mp4',
+        text: payload.text || currentQuestion.text
+      };
+      return preparedQuestionAudio;
+    }
     if (payload.audioBase64 && payload.mimeType) {
       preparedQuestionAudio = {
         key,
@@ -1930,6 +1947,14 @@ async function prepareQuestionAudio({ force = false } = {}) {
         mimeType: payload.mimeType,
         voiceId: payload.voiceId,
         modelId: payload.modelId
+      };
+      return preparedQuestionAudio;
+    }
+    if (payload.provider === 'browser' || payload.fallback === true) {
+      preparedQuestionAudio = {
+        key,
+        provider: 'browser',
+        text: payload.text || currentQuestion.text
       };
       return preparedQuestionAudio;
     }
@@ -1975,10 +2000,18 @@ async function playQuestion() {
   setText(answerMeta, 'audio_out.');
   const prepared = await prepareQuestionAudio();
   if (!prepared) return;
-  const audio = setVoiceAudioSource(prepared.audioBase64, prepared.mimeType);
+  if (prepared.provider === 'browser') {
+    if (playBrowserNarration(prepared.text || currentQuestion.text, 'question')) {
+      setText(answerMeta, 'voice_ready.');
+    }
+    return;
+  }
+  const audio = prepared.audioUrl
+    ? setVoiceAudioUrl(prepared.audioUrl)
+    : setVoiceAudioSource(prepared.audioBase64, prepared.mimeType);
   const played = await playAudioElement(audio, 'question');
   if (!played) return;
-  setText(answerMeta, 'audio_provider=elevenlabs.');
+  setText(answerMeta, 'voice_ready.');
 }
 
 function setupRecognition() {
@@ -2226,22 +2259,6 @@ nameGate?.addEventListener('submit', (event) => {
   });
 });
 
-quickDemoButton?.addEventListener('click', () => {
-  const voicePreview = playDemoVoicePreview();
-  try {
-    seedDemoBook();
-  } catch (error) {
-    note(error instanceof Error ? error.message : 'demo_seed_failed');
-  }
-  voicePreview.catch((error) => note(error instanceof Error ? error.message : 'demo_voice_failed'));
-});
-
-demoVoiceButtons.forEach((button) => {
-  button.addEventListener('click', () => {
-    playDemoVoicePreview().catch((error) => note(error instanceof Error ? error.message : 'demo_voice_failed'));
-  });
-});
-
 beginInterviewButton?.addEventListener('click', () => {
   unlockAudioPlayback();
   beginInterview().catch((error) => {
@@ -2326,6 +2343,4 @@ ensureSession().catch((error) => {
   }
   saveSession(localSession(), 'local');
   showNameGate();
-  setText(sessionStatus, 'Backend no disponible / modo local');
-  note('backend_unavailable / local_mode_active');
 });
