@@ -1,22 +1,26 @@
 import { callFunction } from './api-client.js';
 import { hasBackendConfig } from './config.js';
 
-const STORAGE_KEY = 'future_book_sprint3_session';
-const ANSWERS_KEY = 'future_book_sprint3_answers';
-const MANUSCRIPT_KEY = 'future_book_sprint4_manuscript';
-const PDF_KEY = 'future_book_sprint5_pdf';
-const PENDING_ANSWERS_KEY = 'future_book_sprint8_pending_answers';
-const ENTRY_STAGE_KEY = 'future_book_entry_stage';
-const RITUAL_LOG_KEY = 'future_book_ritual_log';
-const ACCESS_TOKEN_KEY = 'future_book_access_token';
-const UI_VERSION_KEY = 'future_book_minimal_console_v8';
-const CLIENT_BOOT_DELAY_MS = 10000;
+const DEMO_MODE = new URLSearchParams(window.location.search).get('demo') === '1';
+const STORAGE_KEY = DEMO_MODE ? 'future_book_demo_session' : 'future_book_sprint3_session';
+const ANSWERS_KEY = DEMO_MODE ? 'future_book_demo_answers' : 'future_book_sprint3_answers';
+const MANUSCRIPT_KEY = DEMO_MODE ? 'future_book_demo_manuscript' : 'future_book_sprint4_manuscript';
+const PDF_KEY = DEMO_MODE ? 'future_book_demo_pdf' : 'future_book_sprint5_pdf';
+const PENDING_ANSWERS_KEY = DEMO_MODE ? 'future_book_demo_pending_answers' : 'future_book_sprint8_pending_answers';
+const ENTRY_STAGE_KEY = DEMO_MODE ? 'future_book_demo_entry_stage' : 'future_book_entry_stage';
+const RITUAL_LOG_KEY = DEMO_MODE ? 'future_book_demo_ritual_log' : 'future_book_ritual_log';
+const ACCESS_TOKEN_KEY = DEMO_MODE ? 'future_book_demo_access_token' : 'future_book_access_token';
+const UI_VERSION_KEY = DEMO_MODE ? 'future_book_demo_console_v1' : 'future_book_minimal_console_v8';
+const NAME_KEY = DEMO_MODE ? 'future_book_demo_name' : 'future_book_name';
+const CLIENT_BOOT_DELAY_MS = DEMO_MODE ? 250 : 10000;
 const CLIENT_STARTED_AT = Date.now();
 const MAX_CLIENT_AUDIO_BYTES = 24 * 1024 * 1024;
 const INTERVIEW_HEARTBEAT_MS = 45000;
 const PAYMENT_COUNTDOWN_MS = 5 * 60 * 1000;
 const INTRO_AUDIO_TIMEOUT_MS = 70000;
-const PAYMENT_DEADLINE_KEY = 'future_book_payment_deadline';
+const ENTRY_REQUEST_TIMEOUT_MS = 12000;
+const PAYMENT_DEADLINE_KEY = DEMO_MODE ? 'future_book_demo_payment_deadline' : 'future_book_payment_deadline';
+const DEMO_VOICE_PREVIEW_URL = 'https://storage.googleapis.com/eleven-public-prod/database/workspace/1da06ea679a54975ad96a2221fe6530d/voices/PToUZ7lhIUiz1SP94rGo/d4267499-3423-4cac-a4e8-1ff302b63cb8.mp3';
 const AUTONOMOUS_NOTICE = 'system_notice: instancia comercial autonoma; orchestration=GPT-5.5; redaction=GPT-5.5 Pro; human_operator=false; voice_provider=ElevenLabs v3; reasoning_review=Claude Opus 4.8; print_fulfillment=Lulu.';
 const CLIENT_BOOT_LINES = [
   'Last login: Wed Apr 22 11:22:14 on ttys000',
@@ -31,6 +35,18 @@ const CLIENT_BOOT_LINES = [
   'await transaction'
 ];
 function paymentGateLines(remaining = '5:00') {
+  if (DEMO_MODE) {
+    return [
+      'MODO DEMO LOCAL.',
+      '',
+      'DATOS FICTICIOS. NO SE REALIZARA NINGUN CARGO.',
+      'BACKEND EXTERNO: BYPASS.',
+      '',
+      'PULSE CARGAR_DEMO_LIBRO PARA IR AL RESULTADO.',
+      'PULSE ENTER PARA RECORRER EL FLUJO COMPLETO.',
+      `TIEMPO RESTANTE: ${remaining}`
+    ];
+  }
   return [
   'BIENVENIDO.',
   '',
@@ -165,6 +181,30 @@ const interviewQuestions = [
   '¿Qué pregunta no te he hecho y, aun así, sabes que debería haber aparecido?'
 ];
 
+const DEMO_ANSWER_TEXTS = [
+  'Tengo cuarenta y dos años y atravieso una transición: por fuera todo funciona, pero por dentro necesito elegir con más intención.',
+  'La parte que intenta cambiar es la que quiere dejar de medir cada decisión por expectativas ajenas y recuperar curiosidad.',
+  'Empecé como técnico, crecí dirigiendo equipos y construí una carrera sólida, aunque ahora la gestión constante ya no encaja conmigo.',
+  'Estoy evitando mirar cuánto cansancio he normalizado y cuánto de mi agenda existe solo para no decepcionar a otros.',
+  'Vengo de una familia trabajadora donde cumplir era querer; aprendí disciplina, pero también a esconder dudas para no preocupar.',
+  'Me avergüenza reconocer que quiero escribir y enseñar, aunque parezca menos serio que seguir creciendo en mi puesto actual.',
+  'Me gobierna el miedo a perder estabilidad y descubrir que mi identidad dependía más del cargo de lo que admitía.',
+  'Mi antigua profesora cambió mi vida al tratar mi curiosidad como una capacidad y no como una forma de dispersión.',
+  'Estoy cuidando poco a mi pareja porque entrego al trabajo la atención que digo reservar para nuestra vida compartida.',
+  'Debo transformar una amistad sostenida por nostalgia, donde ambos repetimos personajes que ya no representan quiénes somos.',
+  'Sigue llamándome la ambición de crear un proyecto pequeño, excelente y útil, sin convertirlo en otra máquina de estatus.',
+  'Pago con sueño, presencia y paciencia; el coste real aparece en casa cuando llego físicamente pero sigo trabajando por dentro.',
+  'Me da energía explicar problemas complejos con claridad y acompañar a alguien hasta que puede tomar una decisión propia.',
+  'Me apagan las reuniones defensivas, la política interna y la sensación de producir documentos que nadie usa para decidir.',
+  'El dinero significa seguridad, el estatus significa aprobación y la libertad significa tiempo; confundo los tres con demasiada frecuencia.',
+  'Me cuento que soy imprescindible para justificar no delegar, aunque en realidad temo que otros puedan hacerlo igual o mejor.',
+  'Apagar el móvil a las diez y dormir de forma constante cambiaría mi energía, mi humor y la calidad de mis decisiones.',
+  'Querría que entendieran que mi exigencia no nace de frialdad, sino del miedo a fallar a quienes confían en mí.',
+  'Quiero amar con más presencia y menos soluciones, escuchando antes de convertir cada emoción en un problema que arreglar.',
+  'Mi yo futuro me pediría que deje de aplazar la conversación importante y proteja tiempo semanal para construir lo que deseo.',
+  'La pregunta ausente es qué tendría que perder para vivir con más verdad y qué pérdida estoy dispuesto a aceptar ahora.'
+];
+
 const firstQuestion = interviewQuestions[0];
 const futureBoot = document.querySelector('#futureBoot');
 const futureIntro = document.querySelector('#futureIntro');
@@ -188,6 +228,8 @@ const progressBar = document.querySelector('#progressBar');
 const resetButton = document.querySelector('#resetFlowButton');
 const resetCompletedButton = document.querySelector('#resetCompletedButton');
 const resetBookButton = document.querySelector('#resetBookButton');
+const quickDemoButton = document.querySelector('#quickDemoButton');
+const demoVoiceButtons = [...document.querySelectorAll('[data-demo-voice]')];
 const beginInterviewButton = document.querySelector('#beginInterviewButton');
 const startPaymentButton = document.querySelector('#startPaymentButton');
 const generateBookButton = document.querySelector('#generateBookButton');
@@ -220,7 +262,7 @@ let recognition = null;
 let browserSpeechSupported = false;
 let audioCaptured = false;
 let currentAudioMimeType = '';
-let enteredName = sessionStorage.getItem('future_book_name') || '';
+let enteredName = sessionStorage.getItem(NAME_KEY) || '';
 let entryStage = sessionStorage.getItem(ENTRY_STAGE_KEY) || 'payment';
 let heartbeatTimer = null;
 let paymentCountdownTimer = null;
@@ -273,7 +315,7 @@ function clearFutureBookSessionState() {
   sessionStorage.removeItem(MANUSCRIPT_KEY);
   sessionStorage.removeItem(PDF_KEY);
   localStorage.removeItem(PENDING_ANSWERS_KEY);
-  sessionStorage.removeItem('future_book_name');
+  sessionStorage.removeItem(NAME_KEY);
   sessionStorage.removeItem(ENTRY_STAGE_KEY);
   sessionStorage.removeItem(RITUAL_LOG_KEY);
   sessionStorage.removeItem(ACCESS_TOKEN_KEY);
@@ -374,6 +416,19 @@ function startPaymentCountdown() {
 function isAccessError(error) {
   const message = error instanceof Error ? error.message : String(error || '');
   return /access_denied|invite_|campaign_|access_link|Future book access/i.test(message);
+}
+
+function entryErrorMessage(error) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (isBackendUnavailableError(error)) {
+    return 'backend_unavailable / local_mode_active';
+  }
+  return message || 'entry_failed';
+}
+
+function isBackendUnavailableError(error) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /timeout|Failed to fetch|fetch failed|Load failed|NetworkError|ERR_NAME_NOT_RESOLVED|Backend not configured|HTTP (502|503|504)/i.test(message);
 }
 
 function migrateUiMode() {
@@ -583,8 +638,10 @@ function renderEntryStage() {
 function showNameGate() {
   hideAllStages();
   if (nameGate) nameGate.hidden = false;
+  if (quickDemoButton) quickDemoButton.hidden = !DEMO_MODE;
+  demoVoiceButtons.forEach((button) => { button.hidden = !DEMO_MODE; });
   renderEntryStage();
-  setText(sessionStatus, 'session idle');
+  setText(sessionStatus, DEMO_MODE ? 'Demo local / backend bypass' : 'session idle');
   requestAnimationFrame(() => nameInput?.focus());
 }
 
@@ -616,7 +673,7 @@ async function registerOpaqueWaitlist(access) {
     entrypoint: window.location.pathname,
     reason: access?.reason || 'access_denied',
     ...security
-  }).catch(() => null);
+  }, { timeoutMs: ENTRY_REQUEST_TIMEOUT_MS }).catch(() => null);
   return result?.waitlist || null;
 }
 
@@ -640,6 +697,52 @@ function writeLocalAnswer(answer) {
   const answers = readLocalAnswers().filter((item) => item.question_index !== answer.question_index);
   answers.push(answer);
   sessionStorage.setItem(ANSWERS_KEY, JSON.stringify(answers));
+}
+
+function seedDemoBook() {
+  const now = new Date().toISOString();
+  stopPaymentCountdown();
+  persistEntryStage('complete');
+  sessionStorage.removeItem(PAYMENT_DEADLINE_KEY);
+  setRitualLog([
+    'MODO DEMO LOCAL.',
+    '',
+    'DATOS FICTICIOS. NO SE HA REALIZADO NINGUN CARGO.',
+    'ENTREVISTA DE MUESTRA: 21/21.',
+    'MANUSCRITO GENERADO EN ESTE DISPOSITIVO.'
+  ]);
+  enteredName = 'Alex';
+  sessionStorage.setItem(NAME_KEY, enteredName);
+  saveSession({
+    ...localSession(),
+    demo: true,
+    participantName: enteredName,
+    status: 'interview_completed',
+    paymentStatus: 'simulated_approved',
+    interviewStartedAt: now,
+    interviewCompletedAt: now
+  }, 'local');
+  const answers = interviewQuestions.map((question, index) => ({
+    id: crypto.randomUUID(),
+    session_id: currentSession.id,
+    question_index: index + 1,
+    question_text: question,
+    transcript: DEMO_ANSWER_TEXTS[index],
+    transcript_source: 'demo_fixture',
+    duration_seconds: 45,
+    created_at: now
+  }));
+  sessionStorage.setItem(ANSWERS_KEY, JSON.stringify(answers));
+  const manuscript = generateLocalManuscript(answers);
+  writeLocalManuscript(manuscript);
+  saveSession({
+    ...currentSession,
+    status: 'book_ready',
+    bookStatus: 'ready',
+    bookGenerationCompletedAt: now
+  }, 'local');
+  showBook(manuscript, null);
+  note('demo_ready / fictional_data / backend_bypassed');
 }
 
 function readLocalManuscript() {
@@ -1052,14 +1155,16 @@ async function localAction(action, payload = {}) {
   if (action === 'generatePdf') {
     const existing = readLocalPdf();
     const manuscript = readLocalManuscript();
-    const pdf = existing || makeLocalPdf(manuscript);
+    const generated = existing || makeLocalPdf(manuscript);
+    const reviewStatus = DEMO_MODE ? 'released_to_customer' : generated.reviewStatus;
+    const pdf = { ...generated, reviewStatus };
     writeLocalPdf(pdf);
     return {
       ok: true,
       session: {
         ...patched,
-        status: 'pending_review',
-        pdfReviewStatus: 'pending_review',
+        status: reviewStatus === 'released_to_customer' ? 'released_to_customer' : 'pending_review',
+        pdfReviewStatus: reviewStatus,
         pdfReadyAt: new Date().toISOString()
       },
       pdf
@@ -1121,15 +1226,27 @@ async function localAction(action, payload = {}) {
 }
 
 async function futureAction(action, payload = {}) {
-  if (!hasBackendConfig()) return localAction(action, payload);
+  if (DEMO_MODE || !hasBackendConfig() || currentSession?.mode === 'local') return localAction(action, payload);
   const security = await clientSecurityPayload();
-  return callFunction('future-book-session', {
-    action,
-    sessionId: currentSession?.id,
-    publicToken: currentSession?.publicToken,
-    ...security,
-    ...payload
-  });
+  const entryActions = ['recordConsent', 'startSimulatedPayment', 'approveSimulatedPayment', 'startInterview'];
+  try {
+    return await callFunction('future-book-session', {
+      action,
+      sessionId: currentSession?.id,
+      publicToken: currentSession?.publicToken,
+      ...security,
+      ...payload
+    }, {
+      timeoutMs: entryActions.includes(action) ? ENTRY_REQUEST_TIMEOUT_MS : 0
+    });
+  } catch (error) {
+    if (!entryActions.includes(action) || !isBackendUnavailableError(error)) throw error;
+    const participantName = currentSession?.participantName || enteredName || '';
+    saveSession({ ...localSession(), participantName }, 'local');
+    setText(sessionStatus, 'Backend no disponible / modo local');
+    note('backend_unavailable / local_mode_active');
+    return localAction(action, payload);
+  }
 }
 
 async function ensureSession() {
@@ -1178,6 +1295,13 @@ async function ensureSession() {
     return;
   }
 
+  if (DEMO_MODE) {
+    saveSession({ ...localSession(), demo: true }, 'local');
+    note('demo_mode / backend_bypassed');
+    showNameGate();
+    return;
+  }
+
   if (!hasBackendConfig()) {
     if (localAccessDisabled()) {
       hideAllStages();
@@ -1198,7 +1322,7 @@ async function ensureSession() {
     source: inviteToken ? 'ephemeral_url' : 'fixed_beta',
     entrypoint: window.location.pathname,
     ...security
-  });
+  }, { timeoutMs: ENTRY_REQUEST_TIMEOUT_MS });
   if (accessStatus.access?.granted !== true) {
     const waitlist = await registerOpaqueWaitlist(accessStatus.access);
     showAccessDenied(accessStatus.access, waitlist);
@@ -1212,7 +1336,7 @@ async function ensureSession() {
     locale: navigator.language || 'es-ES',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Madrid',
     ...security
-  });
+  }, { timeoutMs: ENTRY_REQUEST_TIMEOUT_MS });
   saveSession(result.session, 'backend');
   note('session_created / waiting_accept');
   showNameGate();
@@ -1268,6 +1392,21 @@ function getSharedVoiceAudio() {
   return sharedVoiceAudio;
 }
 
+async function playDemoVoicePreview() {
+  if (!DEMO_MODE) return false;
+  const audio = getSharedVoiceAudio();
+  try {
+    audio.pause();
+  } catch {}
+  audio.muted = false;
+  audio.volume = 1;
+  audio.src = DEMO_VOICE_PREVIEW_URL;
+  audio.load();
+  const played = await playAudioElement(audio, 'preview');
+  if (played) note('audio_provider=elevenlabs / voice=Javier / demo_preview');
+  return played;
+}
+
 function isLikelyIOS() {
   const ua = navigator.userAgent || '';
   return /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1316,19 +1455,15 @@ function unlockAudioPlayback() {
               htmlAudio.muted = false;
               htmlAudio.volume = 1;
             }
-            note('ios_audio_unlocked');
           })
           .catch(() => {
             if (htmlAudio.src === unlockSrc) {
               htmlAudio.muted = false;
               htmlAudio.volume = 1;
             }
-            note('ios_audio_unlock_pending');
           });
       }
-    } catch {
-      note('ios_audio_unlock_pending');
-    }
+    } catch {}
   }
   if (!AudioContextClass) return;
   try {
@@ -1375,9 +1510,9 @@ async function runClientBootSequence() {
     for (const line of CLIENT_BOOT_LINES) {
       visibleLog += `${line}\n`;
       futureIntroLog.textContent = visibleLog;
-      await wait(380);
+      await wait(DEMO_MODE ? 25 : 380);
     }
-    await wait(520);
+    await wait(DEMO_MODE ? 80 : 520);
     futureIntro.hidden = true;
   }
   if (futurePersistentLog) {
@@ -1393,7 +1528,7 @@ async function runPaymentAnimation() {
   for (let index = 0; index < paymentLines.length; index += 1) {
     paymentLines.forEach((line) => line.classList.remove('is-active'));
     paymentLines[index].classList.add('is-active');
-    await wait(index === paymentLines.length - 1 ? 700 : 850);
+    await wait(DEMO_MODE ? 80 : (index === paymentLines.length - 1 ? 700 : 850));
   }
 }
 
@@ -1472,8 +1607,8 @@ async function acceptPaymentPrelude() {
   saveSession(approved.session, currentSession.mode || 'backend');
 
   const introVoice = trackPromise(prepareNarrationWithTimeout(VOICE_INTRO_SPEECH_TEXT));
-  await typeRitualLines(VERIFIED_LINES, 420);
-  await runTerminalSystemLoader(10000, introVoice);
+  await typeRitualLines(VERIFIED_LINES, DEMO_MODE ? 60 : 420);
+  await runTerminalSystemLoader(DEMO_MODE ? 700 : 10000, introVoice);
   const preparedIntro = await introVoice.promise.catch(() => null);
 
   appendRitualLine('');
@@ -1567,6 +1702,7 @@ function renderPdfState(pdf) {
 function showBook(manuscriptPayload, pdf = null) {
   hideAllStages();
   if (bookStage) bookStage.hidden = false;
+  demoVoiceButtons.forEach((button) => { button.hidden = !DEMO_MODE; });
   setStep('stage 05/05', 'book_engine', '100%');
   const manuscript = manuscriptPayload?.manuscript || manuscriptPayload || {};
   const report = manuscriptPayload?.qualityReport || manuscriptPayload?.quality_report || {};
@@ -1668,7 +1804,7 @@ async function openVoiceFromName(event) {
     if (!currentSession) return;
   }
   enteredName = name.slice(0, 80);
-  sessionStorage.setItem('future_book_name', enteredName);
+  sessionStorage.setItem(NAME_KEY, enteredName);
   if (nameGate) nameGate.hidden = true;
   note('booting_voice');
   setText(sessionStatus, `user=${enteredName}`);
@@ -2000,7 +2136,7 @@ async function saveAnswer() {
 async function beginInterview() {
   beginInterviewButton.disabled = true;
   const result = await futureAction('startInterview', {
-    participantName: enteredName || sessionStorage.getItem('future_book_name') || '',
+    participantName: enteredName || sessionStorage.getItem(NAME_KEY) || '',
     localPatch: { status: 'interview_active', interviewStartedAt: new Date().toISOString() }
   });
   saveSession(result.session, currentSession.mode || 'backend');
@@ -2077,7 +2213,7 @@ form?.addEventListener('submit', (event) => {
 
 nameGate?.addEventListener('submit', (event) => {
   handleEntrySubmit(event).catch((error) => {
-    const message = error instanceof Error ? error.message : 'name_boot_failed';
+    const message = entryErrorMessage(error);
     setNameGateBusy(false);
     if (/Session not found|Missing session credentials/i.test(message)) {
       clearFutureBookSessionState();
@@ -2087,6 +2223,22 @@ nameGate?.addEventListener('submit', (event) => {
     }
     if (nameGate) nameGate.hidden = false;
     note(message);
+  });
+});
+
+quickDemoButton?.addEventListener('click', () => {
+  const voicePreview = playDemoVoicePreview();
+  try {
+    seedDemoBook();
+  } catch (error) {
+    note(error instanceof Error ? error.message : 'demo_seed_failed');
+  }
+  voicePreview.catch((error) => note(error instanceof Error ? error.message : 'demo_voice_failed'));
+});
+
+demoVoiceButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    playDemoVoicePreview().catch((error) => note(error instanceof Error ? error.message : 'demo_voice_failed'));
   });
 });
 
@@ -2173,6 +2325,7 @@ ensureSession().catch((error) => {
     return;
   }
   saveSession(localSession(), 'local');
-  note(error instanceof Error ? error.message : 'session_failed / local_mode');
   showNameGate();
+  setText(sessionStatus, 'Backend no disponible / modo local');
+  note('backend_unavailable / local_mode_active');
 });

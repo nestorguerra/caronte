@@ -184,14 +184,29 @@ export async function signOut() {
   clearSession();
 }
 
-export async function callFunction(name, payload = {}) {
+export async function callFunction(name, payload = {}, { timeoutMs = 0 } = {}) {
   if (!hasBackendConfig()) throw new Error('Faltan variables publicas de backend.');
-  const resp = await fetch(`${config.functionsBaseUrl}/${name}`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(payload)
-  });
-  return parseResponse(resp);
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timeoutId = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+
+  try {
+    const resp = await fetch(`${config.functionsBaseUrl}/${name}`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+      signal: controller?.signal
+    });
+    return await parseResponse(resp);
+  } catch (error) {
+    if (controller?.signal.aborted) {
+      throw new Error(`${name}_timeout`);
+    }
+    throw error;
+  } finally {
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
+  }
 }
 
 export async function getOnboardingState() {
