@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob: https://*.supabase.co https://storage.googleapis.com; connect-src 'self' https://*.supabase.co; frame-src 'self' data: blob: https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co; frame-src 'self' data: blob: https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>Futuro Anterior - Acceso</title>
@@ -62,13 +62,6 @@
         <button class="future-button" type="submit">
           <span>enter</span>
           <span aria-hidden="true">-&gt;</span>
-        </button>
-        <button class="future-button secondary" type="button" id="quickDemoButton" hidden>
-          <span>cargar_demo_libro</span>
-          <span aria-hidden="true">-&gt;</span>
-        </button>
-        <button class="future-button secondary" type="button" data-demo-voice hidden>
-          <span>oir_muestra_voz_caronte / ElevenLabs Javier</span>
         </button>
         <p>49 eur</p>
         <p><a href="./legal/futuro-terms.html">terminos</a> / <a href="./legal/futuro-privacy.html">privacidad</a></p>
@@ -163,7 +156,6 @@
             <span aria-hidden="true">-&gt;</span>
           </button>
           <button class="future-button secondary" type="button" id="downloadPdfButton" hidden>descargar_pdf</button>
-          <button class="future-button secondary" type="button" data-demo-voice hidden>oir_muestra_voz_caronte / ElevenLabs Javier</button>
           <a class="future-button secondary" href="./futuro-admin.html">back_office</a>
           <button class="future-button secondary" type="button" id="resetBookButton">romper sesion</button>
         </div>
@@ -173,6 +165,6 @@
     </section>
   </main>
 
-  <script type="module" src="./scripts/future-book.js?v=20260903-demo-recovery"></script>
+  <script type="module" src="./scripts/future-book.js?v=20260903-production-recovery"></script>
 </body>
 </html>
