@@ -29,12 +29,15 @@ includes(page, [
   'futureAccessForm',
   'paymentStage',
   'readyStage',
-  'quickDemoButton',
-  'data-demo-voice',
-  'storage.googleapis.com',
   'acceptIntensity',
   './scripts/future-book.js'
 ], 'Future book Sprint 1 page');
+
+for (const forbidden of ['quickDemoButton', 'data-demo-voice', 'cargar_demo_libro', 'oir_muestra_voz', 'MODO DEMO']) {
+  if (page.includes(forbidden) || js.includes(forbidden)) {
+    throw new Error(`Production page contains demo marker ${forbidden}`);
+  }
+}
 
 includes(css, [
   '.future-shell',
@@ -54,14 +57,26 @@ includes(js, [
   'hasBackendConfig',
   "currentSession?.mode === 'local'",
   'ENTRY_REQUEST_TIMEOUT_MS',
-  'backend_unavailable / local_mode_active',
-  'DEMO_MODE',
-  'seedDemoBook',
-  'DEMO_VOICE_PREVIEW_URL',
-  'playDemoVoicePreview',
+  'ACTION_REQUEST_TIMEOUT_MS',
+  'LOCAL_VOICE_INTRO_URL',
+  'LOCAL_VOICE_FOLLOW_UP_URL',
+  'localQuestionVoiceUrl',
+  "provider: 'local_audio'",
+  'setVoiceAudioUrl',
+  'playBrowserNarration',
+  'SpeechSynthesisUtterance',
   'sessionStorage',
   'showReady'
 ], 'Future book Sprint 1 frontend');
+
+for (const voiceFile of [
+  'src/caronte-voice-intro.m4a',
+  'src/caronte-voice-followup.m4a',
+  ...Array.from({ length: 21 }, (_, index) => `src/caronte-voice-q${String(index + 1).padStart(2, '0')}.m4a`)
+]) {
+  const audio = await readFile(path.join(root, voiceFile));
+  if (audio.length < 1_000) throw new Error(`Voice fallback is empty: ${voiceFile}`);
+}
 
 includes(apiClient, [
   'timeoutMs = 0',

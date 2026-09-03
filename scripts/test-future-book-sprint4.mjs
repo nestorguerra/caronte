@@ -34,9 +34,6 @@ includes(page, [
 includes(js, [
   'future_book_sprint4_manuscript',
   'generateLocalManuscript',
-  'DEMO_ANSWER_TEXTS',
-  'demo_fixture',
-  'seedDemoBook',
   'generateBook',
   'showBook',
   'getBookStatus',
