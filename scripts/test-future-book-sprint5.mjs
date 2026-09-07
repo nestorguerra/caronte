@@ -45,7 +45,7 @@ includes(clientJs, [
   'makeLocalPdf',
   'generatePdf',
   'downloadReleasedPdf',
-  "reviewStatus: 'released_to_customer'",
+  "reviewStatus: 'pending_review'",
   'pdf_status='
 ], 'Future book Sprint 5 frontend');
 

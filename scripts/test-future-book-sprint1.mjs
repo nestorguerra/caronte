@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
 
 const root = process.cwd();
 
@@ -22,6 +24,58 @@ const apiClient = await file('src/scripts/api-client.js');
 const fn = await file('supabase/functions/future-book-session/index.ts');
 const sprint = await file('docs/SPRINT_1_LIBRO_FUTURO_IMPLEMENTATION.md');
 const pkg = await file('package.json');
+
+// Run the actual request path against a failing network boundary. A production
+// timeout must never switch the interview or its voice into a local simulation.
+const actionSource = js.slice(js.indexOf('async function futureAction('), js.indexOf('async function ensureSession('));
+const networkFailure = new Error('future-book-session_timeout');
+const runtime = vm.createContext({
+  hasBackendConfig: () => true,
+  currentSession: { id: 'test-session', publicToken: 'test-token', mode: 'backend' },
+  clientSecurityPayload: async () => ({}),
+  callFunction: async () => { throw networkFailure; },
+  localAction: async () => ({ simulated: true }),
+  isBackendUnavailableError: () => true,
+  saveSession: () => {}, localSession: () => ({}),
+  setText: () => {}, note: () => {}, sessionStatus: {}, enteredName: '',
+  ENTRY_REQUEST_TIMEOUT_MS: 12000, ACTION_REQUEST_TIMEOUT_MS: 30000,
+  INTRO_AUDIO_TIMEOUT_MS: 200000
+});
+vm.runInContext(actionSource, runtime);
+await assert.rejects(runtime.futureAction('synthesizeQuestion', { questionIndex: 0 }), /timeout/);
+runtime.callFunction = async (_name, _payload, options) => options;
+assert.equal((await runtime.futureAction('synthesizeQuestion', { questionIndex: 0 })).timeoutMs, 200000);
+assert.equal((await runtime.futureAction('synthesizeQuestion', { questionIndex: 1 })).timeoutMs, 75000);
+assert.equal((await runtime.futureAction('startInterview')).timeoutMs, 12000);
+runtime.currentSession.mode = 'local';
+await assert.rejects(runtime.futureAction('synthesizeQuestion'), /session_recovery_required/);
+
+runtime.saveSession = (session, mode) => { runtime.currentSession = { ...session, mode }; };
+runtime.callFunction = async () => ({ session: { id: 'server-session', status: 'interview_ready' } });
+runtime.readLocalAnswers = () => [];
+runtime.readPendingAnswers = () => [];
+runtime.readLocalManuscript = () => null;
+assert.equal((await runtime.recoverBackendSession({ id: 'server-session', mode: 'local' })).mode, 'backend');
+runtime.readLocalAnswers = () => [{ transcript: 'A preserved answer' }];
+await assert.rejects(runtime.recoverBackendSession({ id: 'server-session', mode: 'local' }), /respuestas se conservan/);
+runtime.callFunction = async () => { throw new Error('Session not found'); };
+await assert.rejects(runtime.recoverBackendSession({ id: 'offline-session', mode: 'local' }), /respuestas se conservan/);
+let recoveredStage;
+runtime.readLocalAnswers = () => [];
+runtime.readPendingAnswers = () => [];
+runtime.readLocalManuscript = () => null;
+runtime.persistEntryStage = (stage) => { recoveredStage = stage; };
+runtime.sessionStorage = { removeItem() {} };
+runtime.PAYMENT_DEADLINE_KEY = 'deadline';
+assert.equal(await runtime.recoverBackendSession({ id: 'offline-session', mode: 'local' }), null);
+assert.equal(recoveredStage, 'payment');
+runtime.callFunction = async () => { throw networkFailure; };
+await assert.rejects(runtime.recoverBackendSession({ id: 'offline-session', mode: 'local' }), /timeout/);
+runtime.hasBackendConfig = () => false;
+runtime.IS_LOCAL_PREVIEW = false;
+await assert.rejects(runtime.futureAction('synthesizeQuestion'), /backend_config_missing/);
+runtime.IS_LOCAL_PREVIEW = true;
+assert.equal((await runtime.futureAction('synthesizeQuestion')).simulated, true);
 
 includes(page, [
   'Futuro Anterior',

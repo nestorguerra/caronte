@@ -16,9 +16,11 @@ const CLIENT_STARTED_AT = Date.now();
 const MAX_CLIENT_AUDIO_BYTES = 24 * 1024 * 1024;
 const INTERVIEW_HEARTBEAT_MS = 45000;
 const PAYMENT_COUNTDOWN_MS = 5 * 60 * 1000;
-const INTRO_AUDIO_TIMEOUT_MS = 70000;
+const INTRO_AUDIO_TIMEOUT_MS = 200000;
 const ENTRY_REQUEST_TIMEOUT_MS = 12000;
 const ACTION_REQUEST_TIMEOUT_MS = 30000;
+const IS_LOCAL_PREVIEW = window.location.protocol === 'file:'
+  || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
 const PAYMENT_DEADLINE_KEY = 'future_book_payment_deadline';
 const AUTONOMOUS_NOTICE = 'system_notice: instancia comercial autonoma; orchestration=GPT-5.5; redaction=GPT-5.5 Pro; human_operator=false; voice_provider=ElevenLabs v3; reasoning_review=Claude Opus 4.8; print_fulfillment=Lulu.';
 const CLIENT_BOOT_LINES = [
@@ -1085,15 +1087,14 @@ async function localAction(action, payload = {}) {
   if (action === 'generatePdf') {
     const existing = readLocalPdf();
     const manuscript = readLocalManuscript();
-    const generated = existing || makeLocalPdf(manuscript);
-    const pdf = { ...generated, reviewStatus: 'released_to_customer' };
+    const pdf = existing || makeLocalPdf(manuscript);
     writeLocalPdf(pdf);
     return {
       ok: true,
       session: {
         ...patched,
-        status: 'released_to_customer',
-        pdfReviewStatus: 'released_to_customer',
+        status: 'pending_review',
+        pdfReviewStatus: 'pending_review',
         pdfReadyAt: new Date().toISOString()
       },
       pdf
@@ -1155,32 +1156,52 @@ async function localAction(action, payload = {}) {
 }
 
 async function futureAction(action, payload = {}) {
-  if (!hasBackendConfig() || currentSession?.mode === 'local') return localAction(action, payload);
+  if (!hasBackendConfig()) {
+    if (!IS_LOCAL_PREVIEW) throw new Error('backend_config_missing');
+    return localAction(action, payload);
+  }
+  if (currentSession?.mode === 'local') throw new Error('session_recovery_required / recarga la pagina');
   const security = await clientSecurityPayload();
   const entryActions = ['recordConsent', 'startSimulatedPayment', 'approveSimulatedPayment', 'startInterview'];
+  const timeoutMs = action === 'synthesizeQuestion' && Number(payload.questionIndex) === 0
+    ? INTRO_AUDIO_TIMEOUT_MS
+    : action === 'synthesizeQuestion' ? 75000
+    : action === 'generateBook' ? 180000
+    : entryActions.includes(action) ? ENTRY_REQUEST_TIMEOUT_MS : ACTION_REQUEST_TIMEOUT_MS;
+  return callFunction('future-book-session', {
+    action,
+    sessionId: currentSession?.id,
+    publicToken: currentSession?.publicToken,
+    ...security,
+    ...payload
+  }, { timeoutMs });
+}
+
+async function recoverBackendSession(stored) {
+  if (!hasBackendConfig() || stored?.mode !== 'local') return stored;
+  // Do not switch away from material captured during an outage without
+  // reconciling it first, even if an older copy of the session exists remotely.
+  if (readLocalAnswers().length || readPendingAnswers().length || readLocalManuscript()) {
+    throw new Error('La sesion guardada es local. Tus respuestas se conservan; no se han enviado al servidor.');
+  }
   try {
-    return await callFunction('future-book-session', {
-      action,
-      sessionId: currentSession?.id,
-      publicToken: currentSession?.publicToken,
-      ...security,
-      ...payload
-    }, {
-      timeoutMs: entryActions.includes(action) ? ENTRY_REQUEST_TIMEOUT_MS : ACTION_REQUEST_TIMEOUT_MS
-    });
+    const result = await callFunction('future-book-session', {
+      action: 'getSession', sessionId: stored.id, publicToken: stored.publicToken
+    }, { timeoutMs: ENTRY_REQUEST_TIMEOUT_MS });
+    saveSession(result.session, 'backend');
+    return currentSession;
   } catch (error) {
-    if (!isBackendUnavailableError(error)) throw error;
-    const participantName = currentSession?.participantName || enteredName || '';
-    saveSession({ ...localSession(), ...currentSession, participantName }, 'local');
-    setText(sessionStatus, 'session active');
-    note('session_ready');
-    return localAction(action, payload);
+    if (!/Session not found/.test(error instanceof Error ? error.message : String(error))) throw error;
+    sessionStorage.removeItem(PAYMENT_DEADLINE_KEY);
+    persistEntryStage('payment');
+    return null;
   }
 }
 
 async function ensureSession() {
+  if (!hasBackendConfig() && !IS_LOCAL_PREVIEW) throw new Error('backend_config_missing');
   const inviteToken = syncAccessToken();
-  const stored = readStoredSession();
+  const stored = await recoverBackendSession(readStoredSession());
   if (stored?.id && stored?.publicToken) {
     currentSession = stored;
     setText(sessionStatus, `Sesion ${String(stored.id).slice(0, 8)}`);
@@ -1907,7 +1928,7 @@ async function playAudioElement(audio, kind = 'voice') {
     return false;
   });
   if (played) {
-    note(kind === 'intro' ? 'intro_voice_ready' : 'voice_ready');
+    note(kind === 'intro' ? 'intro_audio_provider=elevenlabs' : 'audio_provider=elevenlabs');
   }
   return played;
 }
@@ -2011,7 +2032,7 @@ async function playQuestion() {
     : setVoiceAudioSource(prepared.audioBase64, prepared.mimeType);
   const played = await playAudioElement(audio, 'question');
   if (!played) return;
-  setText(answerMeta, 'voice_ready.');
+  setText(answerMeta, 'audio_provider=elevenlabs.');
 }
 
 function setupRecognition() {
@@ -2339,6 +2360,11 @@ runClientBootSequence().catch(() => {
 ensureSession().catch((error) => {
   if (isAccessError(error)) {
     showAccessDenied({ reason: error instanceof Error ? error.message : 'access_denied' });
+    return;
+  }
+  if (hasBackendConfig() || !IS_LOCAL_PREVIEW) {
+    showNameGate();
+    note(error instanceof Error ? error.message : 'session_unavailable');
     return;
   }
   saveSession(localSession(), 'local');
