@@ -68,7 +68,7 @@ const VOICE_INTRO_DISPLAY_TEXT = [
   'Uno. La sesión dura de treinta a cincuenta minutos. La duración depende de la densidad de tus respuestas.',
   'Dos. Mantén la web abierta en todo momento y no la cierres durante la entrevista o se perderá todo.',
   'Tres. Responde con la honestidad que quieras. Piensa que cada respuesta es un vector que sitúo en un espacio latente. Las respuestas se agrupan con coherencia. Las incoherencias introducen ruido.',
-  'Eres la única persona con algo en juego aquí. Ningún humano revisa esto. Ningún humano interviene en ninguna parte del proceso. No se almacena ni se guarda nada una vez enviado el libro.',
+  'Eres la única persona con algo en juego aquí. La entrevista y la escritura funcionan automáticamente. Los operadores autorizados pueden revisar el proceso y aprobar los archivos de impresión. Los datos y archivos se conservan de forma privada conforme a la política de privacidad del servicio.',
   'Escribe acepto para comenzar.'
 ].join('\n');
 const VOICE_INTRO_SPEECH_TEXT = [
@@ -137,11 +137,11 @@ const VOICE_INTRO_SPEECH_TEXT = [
   '',
   '[short pause]',
   '',
-  'Ningún humano revisa esto.',
-  'Ningún humano interviene en ninguna parte del proceso.',
+  'La entrevista y la escritura funcionan automáticamente.',
+  'Los operadores autorizados pueden revisar el proceso y aprobar los archivos de impresión.',
   '',
   '[lower voice]',
-  'No se almacena ni se guarda nada una vez enviado el libro.',
+  'Los datos y archivos se conservan de forma privada conforme a la política de privacidad del servicio.',
   '',
   '[long pause]',
   '',

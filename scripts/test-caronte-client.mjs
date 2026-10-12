@@ -28,6 +28,13 @@ function bootMessages() {
   return JSON.parse(vm.runInNewContext(`${source.slice(start, end)}\nJSON.stringify({ notice: AUTONOMOUS_NOTICE, lines: CLIENT_BOOT_LINES });`));
 }
 
+function introductionTexts() {
+  const start = source.indexOf('const VOICE_INTRO_DISPLAY_TEXT =');
+  const end = source.indexOf('const interviewQuestions =', start);
+  assert.ok(start >= 0 && end > start, 'written and spoken introductions must exist');
+  return JSON.parse(vm.runInNewContext(`${source.slice(start, end)}\nJSON.stringify({ display: VOICE_INTRO_DISPLAY_TEXT, speech: VOICE_INTRO_SPEECH_TEXT });`));
+}
+
 test('public boot messages identify the configured writer, reviewer, voice and print providers', () => {
   const { notice, lines } = bootMessages();
   assert.match(notice, /escritura=GPT-6\.1 Sol \(xhigh\)/);
@@ -43,6 +50,19 @@ test('public boot messages disclose authorized operator review instead of promis
   assert.ok(lines.includes('La entrevista y la escritura funcionan automáticamente. Los operadores autorizados pueden revisar el proceso y aprobar los archivos de impresión.'));
   assert.doesNotMatch(lines.join('\n'), /human_operator=false|No hay personas detrás|nadie lo opera|nadie accede|sin intervención humana/);
 });
+
+for (const mode of ['display', 'speech']) {
+  test(`the ${mode} introduction discloses authorized review and private retention`, () => {
+    const text = introductionTexts()[mode];
+    for (const statement of [
+      'La entrevista y la escritura funcionan automáticamente.',
+      'Los operadores autorizados pueden revisar el proceso y aprobar los archivos de impresión.',
+      'Los datos y archivos se conservan de forma privada conforme a la política de privacidad del servicio.'
+    ]) assert.ok(text.includes(statement), `missing approved statement: ${statement}`);
+    assert.doesNotMatch(text, /Ningún humano revisa esto|Ningún humano interviene en ninguna parte del proceso|No se almacena ni se guarda nada una vez enviado el libro/);
+    assert.match(text, /Eres la única persona con algo en juego aquí\./);
+  });
+}
 
 test('queued generation displays progress, not an empty ready book', async () => {
   const c = client({ session: { id: 's1', status: 'book_generating' }, job: { id: 'j1', status: 'queued', stage: 'biography', progress: 0 }, manuscript: null });
