@@ -132,6 +132,58 @@ function printPdf(state='pending') {
     printValidation:{editorial_approval:{reviewer:'editor'},ready_for_print:false,preflight:{status:state,interior:{state:'pending',validation_id:7}}},
     luluMetadata:{ready_for_print:false,ready_for_print_status:state}};
 }
+test('thirty-year print validation uses its stored 216–224 page contract in both API shapes',()=>{
+  const app=harness();app.run("latestDashboardData={admin:{permissions:['adminValidatePrint']}}");
+  for(const pages of [216,220,224])for(const snake of [false,true]){
+    const pdf=printPdf();pdf.pageCount=pages;pdf.metadata.literary_contract_version='caronte-literary-v3';
+    if(snake){pdf.page_count=pdf.pageCount;pdf.review_status=pdf.reviewStatus;pdf.print_validation=pdf.printValidation;
+      delete pdf.pageCount;delete pdf.reviewStatus;delete pdf.printValidation;}
+    app.set('fixture',pdf);assert.equal(app.run('printValidationAllowed(fixture)'),true,`${pages}, snake=${snake}`);
+    app.run('renderPdfs([fixture])');assert.match(app.nodes.get('#pdfBody').innerHTML,/data-validate-print="pdf-id"/);
+  }
+});
+test('print validation keeps legacy limits and rejects unknown or out-of-contract page counts',()=>{
+  const app=harness();app.run("latestDashboardData={admin:{role:'ops'}}");
+  for(const version of [undefined,'caronte-literary-v2','caronte-literary-v3','caronte-literary-v4','']){
+    for(const pages of [179,180,194,200,201,215,216,220,224,225,220.5,'220']){
+      const pdf=printPdf();pdf.pageCount=pages;
+      if(version!==undefined)pdf.metadata.literary_contract_version=version;
+      const current=version==='caronte-literary-v3',legacy=version===undefined||version==='caronte-literary-v2';
+      const expected=Number.isSafeInteger(pages)&&(current?pages>=216&&pages<=224:legacy&&pages>=180&&pages<=200);
+      app.set('fixture',pdf);assert.equal(app.run('printValidationAllowed(fixture)'),expected,`${version}, pages=${pages}`);
+    }
+  }
+});
+test('the new print contract never bypasses approval, storage, role or held receipt gates',()=>{
+  const app=harness(),current=()=>{const pdf=printPdf();pdf.pageCount=220;pdf.metadata.literary_contract_version='caronte-literary-v3';return pdf;};
+  app.run("latestDashboardData={admin:{role:'ops'}}");
+  for(const mutate of [p=>p.reviewStatus='pending_review',p=>p.metadata.storage_verified=false,
+    p=>p.metadata.template='other',p=>delete p.printValidation.editorial_approval]){
+    const pdf=current();mutate(pdf);app.set('fixture',pdf);assert.equal(app.run('printValidationAllowed(fixture)'),false);
+  }
+  for(const state of ['ready','submitting','uncertain','failed','binding_changed','approval_required']){
+    const pdf=current();pdf.printValidation.preflight.status=state;app.set('fixture',pdf);
+    assert.equal(app.run('printValidationAllowed(fixture)'),false,state);
+  }
+  for(const kind of ['interior','cover'])for(const state of ['submitting','uncertain','failed','binding_changed','approval_required']){
+    const pdf=current();pdf.printValidation.preflight[kind]={state};app.set('fixture',pdf);
+    assert.equal(app.run('printValidationAllowed(fixture)'),false,`${kind} ${state}`);
+  }
+  app.set('fixture',current());
+  for(const admin of [{role:'viewer'},{role:'ops',permissions:[]}]){
+    app.set('adminFixture',admin);app.run('latestDashboardData={admin:adminFixture}');
+    assert.equal(app.run('printValidationAllowed(fixture)'),false);
+  }
+});
+test('the thirty-year print action can validate once and reread its matching receipt',async()=>{
+  const before=printPdf();before.pageCount=220;before.metadata.literary_contract_version='caronte-literary-v3';
+  const after=structuredClone(before);after.printValidation.preflight.interior.checked_at='confirmed';let reads=0;
+  const app=harness({reply:payload=>payload.action==='adminValidatePrint'?{ok:true,pdf:after}:{ok:true,pdf:++reads===1?before:after}});
+  app.set('fixture',before);app.run("latestDashboardData={admin:{role:'editor'},pdfs:[fixture]}");
+  await app.run("validatePrint('pdf-id')");
+  assert.deepEqual(app.calls.map(call=>call.action),['adminPrintStatus','adminValidatePrint','adminPrintStatus']);
+  assert.match(app.nodes.get('#printValidationStatus').textContent,/No se ha creado ni pagado/);
+});
 test('print action rereads its receipt, tolerates JSONB key order, and makes one bounded mutation',async()=>{
   const before=printPdf(),after=printPdf();after.printValidation.preflight.interior.checked_at='confirmed';
   let reads=0;

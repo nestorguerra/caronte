@@ -740,12 +740,14 @@ function printValidationAllowed(pdf) {
     : ['editor', 'ops', 'owner', 'legacy_token', 'local_admin'].includes(admin?.role);
   const validation = pdf?.printValidation || pdf?.print_validation || {};
   const metadata = pdf?.metadata || {};
+  const version = metadata.literary_contract_version ?? 'caronte-literary-v2';
+  const limits = version === 'caronte-literary-v3' ? [216, 224] : version === 'caronte-literary-v2' ? [180, 200] : null;
   const state = validation.preflight;
   const pages = pdf?.pageCount ?? pdf?.page_count;
   const held = ['submitting', 'uncertain', 'failed', 'binding_changed', 'approval_required'];
   return allowed && ['approved', 'released_to_customer'].includes(pdfStatus(pdf)) &&
     metadata.template === 'caronte-a5-embedded-v2' && metadata.storage_verified === true &&
-    !!validation.editorial_approval && Number.isSafeInteger(pages) && pages >= 180 && pages <= 200 &&
+    !!validation.editorial_approval && !!limits && Number.isSafeInteger(pages) && pages >= limits[0] && pages <= limits[1] &&
     state?.status !== 'ready' && !held.includes(state?.status) &&
     !held.includes(state?.interior?.state) && !held.includes(state?.cover?.state);
 }
