@@ -403,3 +403,45 @@ test('an operator-reconciled eighth review keeps its binding and advances only t
   assert.deepEqual(steps.at(-1),reconciled);
   assert.equal(JSON.stringify(publicBookJob(input.job,steps)).includes('Synthetic independent evidence'),false);
 });
+
+test('the approved ninth reference reconciliation advances only the tenth draft without repeating Opus',async()=>{
+  const unitId='ch_02_u_03';
+  const draft={unitId,paragraphs:Array.from({length:32},(_,i)=>`Verified unique passage P${i+1}.`)};
+  const dimensions=['grounding','voice','depth','futureTexture','coherence','originality','recognition','causalPlausibility'];
+  const actual=[1,24,3,4,28,6,7,26,9,32,11,31,13,14,15,22];
+  const changed=[1,4,7,9,11,15];
+  const original={unitId,verdict:'pass',scores:Object.fromEntries(dimensions.map(d=>[d,4])),issues:[],coveredUnitIds:[unitId],
+    evidence:actual.map((paragraphIndex,i)=>({dimension:dimensions[Math.floor(i/2)],unitId,
+      paragraphIndex:paragraphIndex+(changed.includes(i)?1:0),
+      quote:draft.paragraphs[paragraphIndex-1],rationale:'Synthetic ninth evidence, private diagnostic'}))};
+  const context={contractVersion:LITERARY_CONTRACT.version,unit:{id:unitId},draft};
+  assert.throws(()=>validateArtifact('review',original,context),{code:'review_evidence_mismatch'});
+  const candidate=structuredClone(original);
+  for(const i of changed)candidate.evidence[i].paragraphIndex--;
+  const approved=validateArtifact('review',candidate,context);
+  const steps=[...base];
+  for(const unit of outline.chapters.flatMap(c=>c.units).slice(0,8)){
+    steps.push(completed(`draft:${unit.id}:0`,'draft',{unitId:unit.id,paragraphs:['Complete synthetic unit']},unit.id));
+    steps.push(completed(`review:${unit.id}:0`,'review',{verdict:'pass'},unit.id));
+  }
+  const receipt={provider_request_id:'msg_preserved_ninth',attempt:1,usage:{input_tokens:63703,output_tokens:4881},
+    input_hash:hash(draft),diagnostic:{terminal:true,uncertain:false,providerStatus:'completed',artifact:original}};
+  const reconciled={...completed(`review:${unitId}:0`,'review',approved,unitId),...receipt,
+    history:[{action:'approved_review_reference_reconciliation',receipt}]};
+  steps.push(completed(`draft:${unitId}:0`,'draft',draft,unitId),reconciled);
+  assert.equal(planNextStep(steps).key,'draft:ch_02_u_04:0');
+  const artifacts=collectArtifacts(steps);
+  assert.equal(artifacts.approvalBindings.units[unitId],hash(draft));
+  assert.deepEqual(artifacts.reviews[unitId],approved);
+  const {input,writes,calls}=setup({steps});
+  input.provider.start=async(_request,options)=>{
+    calls.start++;assert.equal(options.provider,'openai');
+    assert.equal(writes[0].step.step_key,'draft:ch_02_u_04:0');
+    return {status:'pending',id:'resp_tenth_draft',model:'writer'};
+  };
+  input.provider.poll=async()=>{throw new Error('Must not poll the completed ninth Opus receipt');};
+  assert.deepEqual(await runClaimedJob(input),{status:'queued'});
+  assert.equal(calls.start,1);assert.equal(calls.poll,0);
+  assert.deepEqual(steps.at(-1),reconciled);
+  assert.equal(JSON.stringify(publicBookJob(input.job,steps)).includes('Synthetic ninth evidence'),false);
+});

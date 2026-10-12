@@ -187,3 +187,82 @@ La consulta de las 15:00:25 UTC confirma Sol escribiendo `ch_02_u_03`, recibo
 No se repitió Opus, no se reescribió la octava unidad y no se tocaron HTML/CSS.
 La reserva y las dos antiguas repeticiones están consumidas: nunca reutilizarlas.
 El libro completo y el piloto siguen pendientes de revisión literaria/humana/PDF.
+
+## Publicación y nuevo diagnóstico: 15:08 UTC
+
+La conciliación octava se publicó en GitHub main con
+`e1bde192f9efb4005a184a4537d897ec55522f3e`; Pages `38267674179 SUCCESS`.
+CI confirmó 4 + 483 pruebas sin fallos, validate y build. HTML y CSS públicos
+releídos a las 15:08:15 UTC, HTTP 200: hashes originales idénticos a los indicados
+arriba. No se cambiaron la página ni el validador ni los proveedores.
+
+Sol terminó `ch_02_u_03`, recibo
+`resp_0736a95911588ea3006accf609078087d2883bd7e8c87079c4`.
+Su revisión se bloqueó a las 15:06:19 UTC por `review_evidence_mismatch`:
+`msg_011CfxYqY2qLR6TshNGrGZb9`, intento 1, entrada 63.703 y salida 4.881.
+Respuesta completa conservada, terminal completed y uncertain=false.
+Input hash `8b96a7b0fe17d8e94ab88a2bd203928b6eb1c8eed197b569c334497d1ee8823e`.
+
+Lectura íntegra de 32 párrafos y revisión: 16 citas literales y únicas, diez
+referencias correctas y seis desplazadas al párrafo siguiente. Solo en una copia
+local, los índices evidenceIndex 1,4,7,9,11,15 pasan respectivamente
+25→24, 29→28, 27→26, 33→32, 32→31, 23→22. Ese candidato pasa el validador
+ORIGINAL; el objeto original sigue fallando. Ningún otro campo cambia.
+Original SHA canónico `a9c2c706dd0e7c43776437cea873ede3faf4dd371104428a4786d276319acb49`;
+candidato `eae9eb572ffe2abe8b63f9b729595c5a9ad53a34cf7c6e3abbc8aae75d2acf89`.
+Informe y JSON privados en `/tmp/caronte-deployment.P4WcDs/unit-nine-evidence-audit.md`.
+
+NO se implementó ni aplicó esta conciliación nueva. La autorización octava está
+consumida y no cubre la novena. Se solicita autorización específica; mantener el
+libro bloqueado, sin repetir Opus ni reescribir. Conservar las cuatro observaciones
+menores (horas, vuelta del cine, atribución de irritación y gesto de la camisa)
+para la lectura completa. El diagnóstico no acredita aprobación literaria humana.
+Ante estado igual no repetir la alerta ni la solicitud. PostgreSQL local detenido.
+
+## Novena conciliación autorizada y verificada: 18:06 UTC
+
+La autorización humana `call_5307ae47b6aa457e8b4ed3b11f1a5ae7` aprobó únicamente
+los seis números de párrafo de la novena revisión. La reserva
+`e6e1319d-053a-40f7-b447-2d644cbf8f21` se consumió una vez a las
+18:02:47.644525 UTC. El estado pendiente de las 15:08 es histórico y queda
+resuelto; NO volver a aplicar esa autorización ni las anteriores.
+
+La nueva operación exclusiva de operador `caronte_reconcile_ninth_review_references`
+está ligada al recibo `msg_011CfxYqY2qLR6TshNGrGZb9`, hash y seis cambios
+exactos indicados arriba. SECURITY INVOKER, search_path vacío y EXECUTE solo para
+service_role; sin ruta ni permisos nuevos de navegador o trabajador. El cuerpo
+alojado se releyó byte a byte idéntico a la migración CLI 2.120.0. La operación
+octava no se modifica. No cambian prompts, prosa, validador, criterios ni modelos.
+
+Relectura durable: novena completed/pass, intento 1, mismo recibo/input hash y
+consumo 63.703/4.881. Diagnostic íntegro, fila original e historial previo completos,
+mapa exacto y copia validada conservados. La copia pasa el validador original;
+el objeto rechazado original sigue fallando. Se comparó la fila completa del
+borrador y no cambió. No hubo otra llamada a Opus ni reescritura de la unidad.
+
+La prueba SQL independiente pasó RED por operación ausente y GREEN en PostgreSQL
+nativo, con service_role real y también alojado, siempre con ROLLBACK. Se comprobó
+cero residuos; la regresión octava pasa. El único arreglo de fixture fue renombrar
+una variable ambigua, sin cambiar condiciones ni expectativas. La nueva prueba
+del motor salta al décimo borrador sin consultar ni repetir Opus y mantiene el
+diagnóstico privado. Suite completa: 4 de paquete + 484 Caronte = 488 pruebas,
+sin fallos, más 17 comprobaciones heredadas; validate y build pasan. Se usó el
+Node integrado porque npm no estaba disponible, sin instalar dependencias.
+PostgreSQL nativo detenido y puerto 24074 libre.
+
+Un aviso inicial con cabecera incorrecta fue rechazado HTTP 400 antes del claim;
+no generó etapa ni llamada a un modelo. Una importación posterior falló antes de
+HTTP por faltar process en el runtime. El ejecutable existente, con su cabecera
+exclusiva correcta, aceptó un único aviso posterior. No se repitió la conciliación.
+La consulta durable de las 18:06 confirma nueve unidades aprobadas y Sol escribiendo
+`ch_02_u_04`, intento 1, recibo guardado
+`resp_0933a961edd38050006acd21878b3487d2b14b48924818111b`, hash
+`7bbab8e73ba9b5e2354043b73cb33f4822a55116bd222079cd9017f4bd8c2b92`.
+El mismo trabajo continúa sin error; aceptación HTTP no se confunde con finalización.
+
+Las cuatro observaciones menores de la novena siguen pendientes de lectura
+completa. Cualquier fallo nuevo exige diagnóstico nuevo y aprobación específica;
+no corregir otras referencias automáticamente ni repetir llamadas pagadas.
+La página no cambia. Manuscrito completo, lectura literaria íntegra, PDF genuinos,
+revisión humana y aprobación de esos archivos exactos antes de Lulu siguen pendientes.
+No crear pedidos ni pagos ni declarar listo el piloto.

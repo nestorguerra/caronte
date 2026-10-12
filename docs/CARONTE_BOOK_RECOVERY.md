@@ -126,6 +126,26 @@ La reserva `f3f5f2f9-f3bf-4294-9e85-52d4320f7816` YA SE CONSUMIÓ: octava revisi
 completada, mismo recibo/intento/consumo; Sol inició la novena unidad. No reutilizar
 esa autorización para otro fallo. Leer el checkpoint para sus hashes y evidencia.
 
+La novena revisión requirió otra autorización específica:
+`call_5307ae47b6aa457e8b4ed3b11f1a5ae7`. La nueva operación
+`caronte_reconcile_ninth_review_references` queda fijada al recibo
+`msg_011CfxYqY2qLR6TshNGrGZb9`, su input hash y sus seis índices exactos.
+No generaliza ni sustituye la operación octava. Conserva respuesta, fila histórica,
+coste e intento; rechaza cualquier otro campo modificado o cita ambigua. El validador
+original sigue intacto. Pruebas RED→GREEN nativas/service_role y alojadas con
+ROLLBACK, cero residuos; regresión octava y avance al décimo borrador comprobados.
+La reserva `e6e1319d-053a-40f7-b447-2d644cbf8f21` YA SE CONSUMIÓ a las
+18:02:47 UTC. Relectura: novena completed/pass, mismo recibo y consumo 63.703/4.881;
+nueve unidades aprobadas y recibo Sol del décimo borrador guardado. No se repitió Opus.
+Otra conciliación requiere diagnóstico completo y otra autorización humana;
+el trabajador no puede aplicar estas recuperaciones de operador.
+
+El aviso manual usa la cabecera `x-caronte-book-worker-secret`, no Authorization
+Bearer. Un HTTP 400 por token administrativo inválido es un rechazo anterior al
+claim; comprobar las filas durables antes de corregir el aviso. En esta recuperación
+el ejecutable existente aceptó un aviso correcto y se verificó después el recibo
+del décimo borrador. No repetir la reserva para despertar la cola.
+
 La recuperación se detiene desactivando su variable. Eso no cancela una petición
 ya aceptada ni los avisos que ya funcionan en Edge. No modificar o cancelar trabajos
 automáticamente como sustituto de una decisión de operación.
