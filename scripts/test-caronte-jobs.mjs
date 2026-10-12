@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { planNextStep, collectArtifacts, runClaimedJob, publicBookJob } from '../supabase/functions/_shared/caronte-jobs.mjs';
 import { validateArtifact, LITERARY_CONTRACT } from '../supabase/functions/_shared/caronte-literary.mjs';
 
@@ -402,6 +403,73 @@ test('an operator-reconciled eighth review keeps its binding and advances only t
   assert.equal(calls.start,1);assert.equal(calls.poll,0);
   assert.deepEqual(steps.at(-1),reconciled);
   assert.equal(JSON.stringify(publicBookJob(input.job,steps)).includes('Synthetic independent evidence'),false);
+});
+
+test('the twenty-seventh recovery is an isolated operator RPC with the approved receipt and six fixed references',()=>{
+  const sql=readFileSync('supabase/migrations/20261012203353_caronte_approved_twenty_seventh_reference_reconciliation.sql','utf8');
+  assert.match(sql,/create function public\.caronte_reconcile_twenty_seventh_review_references/);
+  assert.match(sql,/language plpgsql security invoker set search_path=''/);
+  assert.match(sql,/msg_011CfxxWtQwV9y6bUAJEeQi9/);
+  assert.match(sql,/0953ab1881820113b355cf06373421748fa609276e899962844542552baa4459/);
+  assert.match(sql,/review:ch_05_u_03:0/);
+  assert.match(sql,/jsonb_array_length\(d.output->'paragraphs'\)<>29/);
+  assert.match(sql,/s.usage->>'input_tokens' is distinct from '80303'/);
+  assert.match(sql,/s.usage->>'output_tokens' is distinct from '5781'/);
+  const corrections=JSON.parse(sql.match(/corrections constant jsonb := '([^']+)'/)[1]);
+  assert.deepEqual(corrections,[{evidenceIndex:5,from:30,to:28},{evidenceIndex:7,from:25,to:24},
+    {evidenceIndex:9,from:31,to:29},{evidenceIndex:11,from:26,to:25},
+    {evidenceIndex:13,from:22,to:21},{evidenceIndex:15,from:24,to:23}]);
+  assert.match(sql,/revoke all on function public\.caronte_reconcile_twenty_seventh_review_references\(uuid,text,text,uuid,jsonb,jsonb,text\) from public,anon,authenticated/);
+  assert.match(sql,/grant execute on function public\.caronte_reconcile_twenty_seventh_review_references\(uuid,text,text,uuid,jsonb,jsonb,text\) to service_role/);
+  assert.doesNotMatch(sql,/create or replace|https?:|caronte_reconcile_ninth_review_references|caronte_reconcile_review_references/);
+});
+
+test('the approved twenty-seventh reconciliation keeps the original evidence and advances only the twenty-eighth draft',async()=>{
+  const unitId='ch_05_u_03';
+  const draft={unitId,paragraphs:Array.from({length:29},(_,i)=>`Verified unique passage P${i+1}.`)};
+  const dimensions=['grounding','voice','depth','futureTexture','coherence','originality','recognition','causalPlausibility'];
+  const actual=[1,2,3,4,5,28,7,24,9,29,11,25,13,21,15,23];
+  const changes=[{evidenceIndex:5,from:30,to:28},{evidenceIndex:7,from:25,to:24},
+    {evidenceIndex:9,from:31,to:29},{evidenceIndex:11,from:26,to:25},
+    {evidenceIndex:13,from:22,to:21},{evidenceIndex:15,from:24,to:23}];
+  const original={unitId,verdict:'pass',scores:Object.fromEntries(dimensions.map(d=>[d,4])),
+    issues:[{id:'minor_27',severity:'minor',location:'paragraph 30',detail:'Keep the original observation.',instruction:'Consider during whole-book reading.'}],coveredUnitIds:[unitId],
+    evidence:actual.map((paragraphIndex,i)=>({dimension:dimensions[Math.floor(i/2)],unitId,
+      paragraphIndex:changes.find(c=>c.evidenceIndex===i)?.from??paragraphIndex,
+      quote:draft.paragraphs[paragraphIndex-1],rationale:'Synthetic twenty-seventh evidence, private diagnostic'}))};
+  const context={contractVersion:LITERARY_CONTRACT.version,unit:{id:unitId},draft};
+  assert.throws(()=>validateArtifact('review',original,context),{code:'review_evidence_mismatch'});
+  const candidate=structuredClone(original);
+  for(const change of changes)candidate.evidence[change.evidenceIndex].paragraphIndex=change.to;
+  const approved=validateArtifact('review',candidate,context);
+  assert.deepEqual(approved.issues,original.issues);
+  const steps=[...base];
+  for(const unit of outline.chapters.flatMap(c=>c.units).slice(0,26)){
+    steps.push(completed(`draft:${unit.id}:0`,'draft',{unitId:unit.id,paragraphs:['Complete synthetic unit']},unit.id));
+    steps.push(completed(`review:${unit.id}:0`,'review',{verdict:'pass'},unit.id));
+  }
+  const receipt={provider_request_id:'msg_preserved_twenty_seventh',attempt:1,
+    usage:{input_tokens:80303,output_tokens:5781,cache_read_input_tokens:0,cache_creation_input_tokens:0},
+    input_hash:hash(draft),diagnostic:{terminal:true,uncertain:false,providerStatus:'completed',artifact:original}};
+  const reconciled={...completed(`review:${unitId}:0`,'review',approved,unitId),...receipt,
+    history:[{action:'approved_review_reference_reconciliation',receipt,corrections:changes}]};
+  steps.push(completed(`draft:${unitId}:0`,'draft',draft,unitId),reconciled);
+  const before=structuredClone(steps);
+  assert.equal(planNextStep(steps).key,'draft:ch_05_u_04:0');
+  const artifacts=collectArtifacts(steps);
+  assert.equal(artifacts.approvalBindings.units[unitId],hash(draft));
+  assert.deepEqual(artifacts.reviews[unitId],approved);
+  const {input,writes,calls}=setup({steps});
+  input.provider.start=async(_request,options)=>{
+    calls.start++;assert.equal(options.provider,'openai');
+    assert.equal(writes[0].step.step_key,'draft:ch_05_u_04:0');
+    return {status:'pending',id:'resp_twenty_eighth_draft',model:'writer'};
+  };
+  input.provider.poll=async()=>{throw new Error('Must not poll the completed twenty-seventh Opus receipt');};
+  assert.deepEqual(await runClaimedJob(input),{status:'queued'});
+  assert.equal(calls.start,1);assert.equal(calls.poll,0);
+  assert.deepEqual(steps,before);
+  assert.equal(JSON.stringify(publicBookJob(input.job,steps)).includes('Synthetic twenty-seventh evidence'),false);
 });
 
 test('the approved ninth reference reconciliation advances only the tenth draft without repeating Opus',async()=>{

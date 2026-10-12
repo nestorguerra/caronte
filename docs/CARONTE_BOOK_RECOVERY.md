@@ -140,6 +140,28 @@ nueve unidades aprobadas y recibo Sol del décimo borrador guardado. No se repit
 Otra conciliación requiere diagnóstico completo y otra autorización humana;
 el trabajador no puede aplicar estas recuperaciones de operador.
 
+La revisión 27 recibió autorización específica
+`call_1afcaaf62b8047af96a7beb8337a91ae`. La nueva operación aislada
+`caronte_reconcile_twenty_seventh_review_references` queda ligada a
+`msg_011CfxxWtQwV9y6bUAJEeQi9`, su hash de entrada y seis índices exactos.
+La migración alojada y local tienen versión `20261012203353`; su cuerpo se
+releyó byte a byte. No sustituye las operaciones octava y novena, cuyo cuerpo y
+permisos permanecen intactos. El validador y el borrador no cambian.
+Las pruebas fallaron primero por ausencia de la operación y pasaron después en
+PostgreSQL nativo y alojado, también como service_role, con ROLLBACK y cero residuos.
+Una regresión del motor comprueba el avance exclusivo a la unidad 28 sin repetir
+la revisión 27. La suite completa tiene 490 pruebas, sin fallos, más comprobaciones
+heredadas, validate y build. El entorno nativo quedó detenido, puerto 24074 libre.
+La reserva `27bea901-4866-4c82-86c5-37dce0cc0264` YA SE CONSUMIÓ a las
+20:36:04 UTC. Relectura: revisión 27 completed/pass, mismo recibo/intento y
+consumo 80.303/5.781, diagnóstico original e historial previo íntegros, mapa y
+copia validada conservados. Los 61 pasos anteriores y el borrador no cambiaron.
+Un aviso del ejecutable existente fue aceptado una sola vez; a las 20:37:20 UTC,
+Sol tenía guardado el recibo de la unidad 28. No se repitió Opus ni se reescribió
+la unidad 27. No reutilizar esta autorización para otra conciliación.
+El manuscrito, la lectura final íntegra, sus PDF genuinos y la aprobación humana
+exacta antes de Lulu siguen pendientes. No pedidos ni pagos.
+
 El aviso manual usa la cabecera `x-caronte-book-worker-secret`, no Authorization
 Bearer. Un HTTP 400 por token administrativo inválido es un rechazo anterior al
 claim; comprobar las filas durables antes de corregir el aviso. En esta recuperación

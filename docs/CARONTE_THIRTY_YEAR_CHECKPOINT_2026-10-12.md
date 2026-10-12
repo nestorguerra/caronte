@@ -266,3 +266,113 @@ no corregir otras referencias automáticamente ni repetir llamadas pagadas.
 La página no cambia. Manuscrito completo, lectura literaria íntegra, PDF genuinos,
 revisión humana y aprobación de esos archivos exactos antes de Lulu siguen pendientes.
 No crear pedidos ni pagos ni declarar listo el piloto.
+
+## Publicación y avance verificados: 18:14 UTC
+
+La recuperación novena se publicó en main:
+`c2b35360d7b57565c7c64f30b466733a32a63471`, Pages `38288836269 SUCCESS`.
+Build y deploy completados; logs CI: 4 + 484 pruebas, cero fallos, validate y build
+correctos. El despliegue esperó sin pedir revisión humana ni cambiar reglas;
+no se reinició. HTTP 200 a las 18:13:49 UTC, HTML y CSS públicos idénticos byte
+a byte a los archivos locales y a sus hashes originales indicados arriba.
+
+La décima `ch_02_u_04` terminó su revisión con pass:
+`msg_011Cfxnz5fCn2M1DiyYbawN7`, intento 1, consumo 64.725/5.885 e input hash
+`10dff9837b85980196bfcd79de3e511ca3272d8b3d44a42529800452cf0ad6d5`.
+Diez unidades han pasado. Sol ya inició la undécima `ch_02_u_05`, intento 1,
+recibo `resp_034b860750716eb7006acd23013d8487d28902b7e2d2a709d7` y hash
+`d11143c4a2b5f08da64ec8ed98626a6c79b5c93ac62511fcc221a7ed69120b0a`
+guardados. Relectura durable 18:13:51 UTC, mismo trabajo running/draft, sin error.
+No despertar, modificar ni repetir proveedores mientras avance normalmente.
+Seguimiento ACTIVE cada quince minutos, instrucciones releídas tras actualizar
+el estado consumido y conservar todos los límites de revisión, costes y Lulu.
+No se ha terminado el manuscrito ni validado su par auténtico de PDF.
+
+## Nuevo diagnóstico y autorización pendiente: 20:22 UTC
+
+El mismo trabajo avanzó sin intervención hasta las primeras 26 unidades aprobadas.
+La revisión 27, `ch_05_u_03`, se bloqueó a las 20:17:01 UTC por
+`review_evidence_mismatch`. Recibo `msg_011CfxxWtQwV9y6bUAJEeQi9`, intento 1,
+consumo 80.303/5.781, cachés cero. El diagnóstico conserva la respuesta íntegra,
+terminal `completed` y `uncertain=false`. Input hash y SHA canónico del borrador:
+`0953ab1881820113b355cf06373421748fa609276e899962844542552baa4459`.
+
+Se leyeron toda la unidad y la revisión: 29 párrafos, 2.048 palabras y 16 citas
+literales, cada una en un único párrafo. Diez referencias son correctas y seis
+están desplazadas. SOLO en una copia privada, evidenceIndex 5,7,9,11,13,15 pasan
+respectivamente 30→28, 25→24, 31→29, 26→25, 22→21, 24→23.
+La copia pasa el validador ORIGINAL sin modificarlo; el original reproduce el
+rechazo. Ningún otro campo cambia: prosa, citas, puntuaciones, observaciones,
+instrucciones y cobertura permanecen intactos. Las localizaciones escritas dentro
+de los comentarios originales no sustituyen las comprobaciones de evidence.
+SHA canónico original `41ccd006436ea4e1def130fc1ecfd67a8e8efe6557f1de643090196f05dcea29`;
+candidato `3fa555c537948bf7babdc9b5392bd207e4e8600cd93ccff5f8acc00febfb4532`.
+
+El programa privado de auditoría importa el validador real, comprueba identidad,
+consumo, terminalidad, hash de entrada y unicidad; no hace peticiones de red ni
+modifica la base de datos. Informe y archivos privados modo 0600 en el directorio
+0700: `/tmp/caronte-deployment.P4WcDs/unit-twenty-seven-evidence-audit.md`.
+Relectura durable a las 20:22:37 UTC: trabajo bloqueado, sin lease, sin manuscrito,
+26 IDs aprobados contiguos; fila de revisión y borrador íntegros sin cambios.
+
+NO se implementó ni aplicó esta nueva conciliación y NO existe reserva aprobada.
+Se solicita autorización específica para este recibo y mapa. Las autorizaciones
+octava y novena y las repeticiones primera y tercera YA ESTÁN CONSUMIDAS; nunca
+reutilizarlas. Sin una respuesta humana nueva, no aplicar el candidato, reanudar,
+despertar la cola ni repetir llamadas de pago. No cambiar prompts ni rebajar gates.
+Tras comunicar este bloqueo y solicitar la decisión, no repetir la alerta.
+
+Se conserva para lectura completa la repetición de la espera en cenas, la pregunta
+del yo presente y la enumeración poco escénica de tareas. Se han leído íntegramente
+de forma preliminar las unidades 1–18 y la 27, no el manuscrito final. El resto de
+la novela, revisión longitudinal, lectura integral, PDF genuinos y autorización
+humana ligada a sus archivos exactos antes de Lulu siguen pendientes.
+No se modificaron HTML/CSS, servidor, proveedores ni publicaciones en este diagnóstico.
+No hay pedidos, pagos ni envíos; el piloto todavía no está listo.
+
+## Conciliación 27 autorizada y verificada: 20:37 UTC
+
+El estado pendiente anterior es histórico. Néstor aprobó específicamente
+`call_1afcaaf62b8047af96a7beb8337a91ae`: solo los seis números del mapa anterior,
+sin repetir Opus ni reescribir la unidad. La reserva nueva
+`27bea901-4866-4c82-86c5-37dce0cc0264` se consumió UNA VEZ a las
+20:36:04.683030 UTC. JAMÁS reutilizar esta autorización ni las anteriores.
+
+RPC exclusivo `caronte_reconcile_twenty_seventh_review_references`, migración
+`20261012203353`, SECURITY INVOKER, search_path vacío, ejecución solo service_role.
+Recibo/hash/consumo/mapa quedan fijos; cualquier otro cambio o cita ambigua se
+rechaza. El cuerpo alojado coincide byte a byte con el local. Los cuerpos y
+permisos de las operaciones octava y novena no cambiaron. El validador original,
+prompts y HTML/CSS permanecen intactos. No se desplegó otra versión de Edge.
+
+Pruebas RED→GREEN de ausencia y restricciones, PostgreSQL 17.11 nativo y alojado,
+service_role y ROLLBACK; cero residuos sintéticos. Regresiones octava y novena
+locales siguen pasando. La suite completa verificó 4 + 486 pruebas sin fallos,
+las 17 comprobaciones heredadas, validate y build. Dos pruebas enfocadas se
+repitieron únicamente tras ajustar el nombre local a la versión de migración
+asignada por el servidor. PostgreSQL local detenido y puerto 24074 libre.
+Un primer arranque local sin la ruta de su clave sintética falló antes de aceptar
+conexiones; se diagnosticó y arrancó con la ruta privada ya existente. No se
+cambiaron claves, dependencias, permisos generales ni procesos de producción.
+
+Relectura durable 20:36:25 UTC: revisión 27 completed/pass, mismo recibo
+`msg_011CfxxWtQwV9y6bUAJEeQi9`, intento 1, input hash
+`0953ab1881820113b355cf06373421748fa609276e899962844542552baa4459`, consumo
+80.303/5.781 y cachés cero. Respuesta original, fila completa anterior e historial
+previo conservados; copia validada y mapa exacto añadidos al historial. Solo
+cambiaron seis evidence.paragraphIndex. El borrador y los otros 61 pasos fueron
+comparados completos y permanecen intactos. Evidencias privadas modo 0600.
+
+Un único aviso con el ejecutable existente fue aceptado. No se repitió Opus.
+Relectura 20:37:20 UTC: 27 unidades aprobadas, mismo trabajo queued/draft sin
+error. Sol inició `ch_05_u_04`, intento 1, recibo
+`resp_06ff67e4f7bc7b95006acd44e8af1487d2a686f0df6b541375`, input hash
+`c44148c18803dfe6b1189657385555cc1e6329cff0fa068b4f9bc986a894cd6b`
+guardados. No despertar ni modificar nada mientras avance normalmente.
+
+Se leyeron preliminarmente completas las unidades 19 y 20 durante la espera;
+el alcance de lectura real es ahora 1–20 y 27. No sustituye la lectura de las
+30 unidades finales ni acredita revisión humana. Conservar las tres observaciones
+menores de la revisión 27 para ese pase. El manuscrito, revisión longitudinal,
+lectura íntegra, PDF genuinos y aprobación humana ligada a sus hashes antes de
+Lulu siguen pendientes. No pedidos, pagos ni envíos; el piloto no está listo.
