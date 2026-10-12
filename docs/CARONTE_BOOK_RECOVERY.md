@@ -94,6 +94,22 @@ es idempotente tras perder un acuse y rechaza incertidumbre/refusal/segunda repe
 El trabajador no tiene acceso a esa operación. La revisión repetida terminó y
 exigió una reescritura: no se rebajó el criterio editorial para aprobar el texto.
 
+Una tercera unidad detectó `review_evidence_mismatch`. El recibo y consumo se
+conservaron, pero la respuesta rechazada antigua no se guardó: su cita no puede
+reconstruirse. El corte posterior conserva futuros objetos rechazados en el
+diagnóstico privado y terminal, no como salida aprobada. Una reanudación accidental
+no consulta ni repite esa generación. La pérdida y el arreglo se reproducen con
+el validador literario real y dos nuevas pruebas RED→GREEN; el transporte es sintético.
+La persistencia se comprobó también en PostgreSQL nativo y alojado con ROLLBACK.
+
+La aprobación específica `call_e195f69bd1444c19aa15a9da4cdc9775` permite repetir
+solo esa tercera revisión con el mismo texto y máximo 16000 tokens. La nueva RPC
+de operador `caronte_retry_rejected_review` conserva el recibo entero antes de
+limpiar el handle, exige identidad/hash/consumo/estado históricos exactos y rechaza
+incertidumbre, otro intento u otra aprobación. Repetir el mismo acuse no reinicia
+una petición en marcha. Ni el navegador ni el trabajador tienen acceso a esa RPC.
+Una autorización no convierte una respuesta en aprobación literaria.
+
 La recuperación se detiene desactivando su variable. Eso no cancela una petición
 ya aceptada ni los avisos que ya funcionan en Edge. No modificar o cancelar trabajos
 automáticamente como sustituto de una decisión de operación.

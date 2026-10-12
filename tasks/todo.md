@@ -18,7 +18,7 @@
   - Aceptación: ID válido durable; incompleto nunca listo; cero reenvío de intentos inciertos.
   - Verificar: test independiente preflight/route y operaciones reales aprobadas.
   - Archivos: print-preflight y sus pruebas. Depende: identidad de archivos y aprobación.
-- [ ] E Publicación sin cambios públicos de diseño.
+- [x] E Publicación sin cambios públicos de diseño.
   - Aceptación: servidor releído; Pages success; HTML/CSS idénticos; Sol/Opus efectivos.
   - Verificar: suite, validate/build, readback remoto, hash público. Depende:A–D.
 - [ ] F Piloto literario e imprenta completos.

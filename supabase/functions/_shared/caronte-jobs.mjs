@@ -214,11 +214,21 @@ export async function runClaimedJob({ job, steps, checkpoint, finish, build, val
       return { status: 'queued' };
     }
     if (result.status !== 'completed') throw Object.assign(new Error(), { code: 'invalid_provider_status', terminal: true });
-    const output = await validate(next.stage, result.parsed, {
-      interview: job.interview, artifacts, contractVersion:artifacts.contractVersion,biography: artifacts.biography,
-      world: artifacts.world, outline: artifacts.outline, plan: artifacts.outline,
-      unit: next.unit, draft: artifacts.drafts[next.unit?.id], review
-    });
+    let output;
+    try {
+      output = await validate(next.stage, result.parsed, {
+        interview: job.interview, artifacts, contractVersion:artifacts.contractVersion,biography: artifacts.biography,
+        world: artifacts.world, outline: artifacts.outline, plan: artifacts.outline,
+        unit: next.unit, draft: artifacts.drafts[next.unit?.id], review
+      });
+    } catch (error) {
+      if (error?.code === 'lease_lost') throw error;
+      // A completed response is not a transport retry. Keep rejected corpus in
+      // the service-only diagnosis, never as approved output or a public log.
+      // Claude has no message GET; dropping it would destroy the only evidence.
+      throw Object.assign(new Error(), { code: safeErrorCode(error), terminal: true,
+        uncertain: false, providerStatus: 'completed', artifact: structuredClone(result.parsed) });
+    }
     await checkpoint({ ...step, status: 'completed', output }, 'queued');
     return { status: 'queued' };
   } catch (error) {

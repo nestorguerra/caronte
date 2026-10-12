@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { planNextStep, collectArtifacts, runClaimedJob, publicBookJob } from '../supabase/functions/_shared/caronte-jobs.mjs';
+import { validateArtifact, LITERARY_CONTRACT } from '../supabase/functions/_shared/caronte-literary.mjs';
 
 function hash(value) {
   const canonical = (item) => Array.isArray(item) ? item.map(canonical) : item && typeof item === 'object'
@@ -267,6 +268,43 @@ test('Anthropic synchronous review cannot become a pending message that has no p
   assert.equal(writes.at(-1).state, 'blocked');
   assert.equal(writes.at(-1).step.provider_request_id, 'msg_review');
   assert.equal(writes.at(-1).step.error_code, 'invalid_provider_status');
+});
+
+test('a completed but invalid Opus review retains its exact artifact privately and stays terminal', async () => {
+  const dimensions = ['grounding','voice','depth','futureTexture','coherence','originality','recognition','causalPlausibility'];
+  const rejected = {unitId:'ch_01_u_01',verdict:'pass',scores:Object.fromEntries(dimensions.map(name=>[name,5])),
+    issues:[],coveredUnitIds:['ch_01_u_01'],evidence:dimensions.map(dimension=>({dimension,
+      unitId:'ch_01_u_01',paragraphIndex:1,quote:'This quotation does not exist.',rationale:'PRIVATE REVIEW CORPUS'}))};
+  const {input,writes,calls}=setup({steps:first,validate:validateArtifact});
+  input.job.model_config.literaryContract=LITERARY_CONTRACT;
+  input.provider.start=async()=>{calls.start++;return {status:'completed',id:'msg_bad_evidence',
+    model:'claude-opus-5-5',usage:{input_tokens:59525,output_tokens:4939},parsed:rejected};};
+  assert.deepEqual(await runClaimedJob(input),{status:'blocked',errorCode:'review_evidence_mismatch'});
+  const receipt=writes.at(-1).step;
+  assert.equal(receipt.status,'failed');assert.equal(receipt.output,undefined);
+  assert.equal(receipt.provider_request_id,'msg_bad_evidence');
+  assert.deepEqual(receipt.usage,{input_tokens:59525,output_tokens:4939});
+  assert.deepEqual(receipt.diagnostic,{terminal:true,uncertain:false,providerStatus:'completed',artifact:rejected});
+  assert.equal(collectArtifacts([...first,receipt]).reviews.ch_01_u_01,undefined);
+  assert.equal(JSON.stringify(publicBookJob(input.job,[...first,receipt])).includes('PRIVATE REVIEW CORPUS'),false);
+  const resumed=setup({steps:[...first,receipt]});
+  await runClaimedJob(resumed.input);
+  assert.equal(resumed.calls.start,0);assert.equal(resumed.calls.poll,0);
+  assert.equal(resumed.writes.at(-1).state,'blocked');assert.equal(calls.start,1);
+});
+
+test('other completed validation failures preserve the raw artifact without swallowing lease loss',async()=>{
+  for(const code of ['unit_word_count','lease_lost']){
+    const {input,writes}=setup({validate:()=>{throw Object.assign(new Error('PRIVATE VALIDATION DETAIL'),{code});}});
+    input.provider.start=async()=>({status:'completed',id:'resp_invalid_draft',model:'writer',parsed:{text:'PRIVATE FULL DRAFT'}});
+    if(code==='lease_lost'){
+      await assert.rejects(runClaimedJob(input),{code});assert.equal(writes.length,1);
+    }else{
+      assert.deepEqual(await runClaimedJob(input),{status:'blocked',errorCode:code});
+      assert.deepEqual(writes.at(-1).step.diagnostic,{terminal:true,uncertain:false,providerStatus:'completed',artifact:{text:'PRIVATE FULL DRAFT'}});
+      assert.equal(JSON.stringify(writes).includes('PRIVATE VALIDATION DETAIL'),false);
+    }
+  }
 });
 
 test('explicit rate-limit rejection may retry with bounded paid-attempt count', async () => {
