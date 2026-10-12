@@ -24,14 +24,14 @@ const ACTION_REQUEST_TIMEOUT_MS = 30000;
 const IS_LOCAL_PREVIEW = window.location.protocol === 'file:'
   || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
 const PAYMENT_DEADLINE_KEY = 'future_book_payment_deadline';
-const AUTONOMOUS_NOTICE = 'system_notice: instancia comercial autonoma; orchestration=GPT-5.5; redaction=GPT-5.5 Pro; human_operator=false; voice_provider=ElevenLabs v3; reasoning_review=Claude Opus 4.8; print_fulfillment=Lulu.';
+const AUTONOMOUS_NOTICE = 'system_notice: escritura=GPT-6.1 Sol (xhigh); revisión=Claude Opus 5.5; voz=ElevenLabs; impresión=Lulu.';
 const CLIENT_BOOT_LINES = [
   'Last login: Wed Apr 22 11:22:14 on ttys000',
   'resolve ephemeral_url',
   AUTONOMOUS_NOTICE,
-  'Caronte es un sistema íntegramente agéntico. Todo lo que ocurre desde que accedes —cada proceso, cada decisión, cada respuesta— lo ejecutan modelos de inteligencia artificial autónomos, cada uno dedicado a su función. No hay personas detrás del servicio: nadie lo opera, lo supervisa ni lo coordina de forma manual, y nadie accede ni atiende a lo que depositas aquí.',
-  'No es una carencia, es el fundamento del diseño. Caronte está construido para funcionar sin intervención humana, de modo que tu confianza no dependa de la discreción de nadie.',
-  'La operación completa la sostienen cuatro modelos dedicados: GPT-5.5 y GPT-5.5 Pro, Claude Opus 4.8 y ElevenLabs v3.',
+  'La entrevista y la escritura funcionan automáticamente. Los operadores autorizados pueden revisar el proceso y aprobar los archivos de impresión.',
+  'La revisión automática no sustituye la aprobación de los archivos de impresión por un operador autorizado.',
+  'La escritura usa GPT-6.1 Sol con xhigh; la revisión, Claude Opus 5.5; la voz, ElevenLabs; y la impresión, Lulu.',
   'validate access_token',
   'create private session',
   'payment_gateway=eur_bypass_beta',

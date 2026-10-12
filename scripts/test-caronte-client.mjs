@@ -21,6 +21,29 @@ function client(initialResult) {
   return { context, shown, notes, scheduled };
 }
 
+function bootMessages() {
+  const start = source.indexOf('const AUTONOMOUS_NOTICE =');
+  const end = source.indexOf('function paymentGateLines(', start);
+  assert.ok(start >= 0 && end > start, 'public boot messages must exist');
+  return JSON.parse(vm.runInNewContext(`${source.slice(start, end)}\nJSON.stringify({ notice: AUTONOMOUS_NOTICE, lines: CLIENT_BOOT_LINES });`));
+}
+
+test('public boot messages identify the configured writer, reviewer, voice and print providers', () => {
+  const { notice, lines } = bootMessages();
+  assert.match(notice, /escritura=GPT-6\.1 Sol \(xhigh\)/);
+  assert.match(notice, /revisión=Claude Opus 5\.5/);
+  assert.match(notice, /voz=ElevenLabs/);
+  assert.match(notice, /impresión=Lulu/);
+  assert.ok(lines.includes(notice));
+  assert.doesNotMatch(lines.join('\n'), /GPT-5\.5|Claude Opus 4\.8/);
+});
+
+test('public boot messages disclose authorized operator review instead of promising no human access', () => {
+  const { lines } = bootMessages();
+  assert.ok(lines.includes('La entrevista y la escritura funcionan automáticamente. Los operadores autorizados pueden revisar el proceso y aprobar los archivos de impresión.'));
+  assert.doesNotMatch(lines.join('\n'), /human_operator=false|No hay personas detrás|nadie lo opera|nadie accede|sin intervención humana/);
+});
+
 test('queued generation displays progress, not an empty ready book', async () => {
   const c = client({ session: { id: 's1', status: 'book_generating' }, job: { id: 'j1', status: 'queued', stage: 'biography', progress: 0 }, manuscript: null });
   await c.context.generateBook();
