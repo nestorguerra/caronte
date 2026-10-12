@@ -120,3 +120,70 @@ No amplía las autorizaciones de costes, reintentos, datos, pedidos ni pagos.
 Pendientes: recorrido literario completo y lectura humana; composición del manuscrito auténtico y una
 aprobación ligada a su futuro par de PDF antes de preflight Lulu. Los recibos
 técnicos sintéticos no se reutilizan para otro libro. El piloto no se declara listo.
+
+## Comprobación de seguimiento: 14:24 UTC
+
+La tercera repetición autorizada terminó con pass, recibo
+`msg_011CfxSdjZbK4fdYDvCr5RkJ`, intento 2, mismo hash y consumo 59.525/7.112.
+La publicación posterior `78a319e02249a8ae3a37eb42c175e12e0eb61944` terminó en
+Pages `38257898379 SUCCESS`. Ambas aprobaciones de repetición están consumidas.
+
+El mismo libro avanzó sin intervención hasta siete unidades aprobadas. La octava,
+`ch_02_u_02`, se bloqueó a las 14:11:33 UTC por `review_evidence_mismatch`.
+Recibo `msg_011CfxUexUEsQW1REXCWrPRa`, intento 1, entrada 62.423 y salida 5.139;
+hash `43d628a12b98aa38a02d2945b376dbf13c7929912c674a9a48895c330c8dbe5f`.
+La respuesta original completa está conservada en `diagnostic.artifact`, terminal
+y no incierta. No se repitió ni se escribió en producción durante el diagnóstico.
+
+Se leyó toda la unidad y revisión: 29 párrafos y 16 citas exactas y únicas.
+Diez referencias son correctas; seis índices apuntan al párrafo siguiente.
+Una copia local con solo esos seis índices corregidos pasa el validador ORIGINAL;
+la respuesta original sigue fallando, como debe. No se alteraron citas, prosa,
+puntuaciones, observaciones ni criterios. La copia canónica propuesta tiene SHA256
+`0e7b1a9e90c7947bf2980c1aa71553b2aaf075ec6f1c45c4f8f6ec858e0e27bd`;
+el original, `6a87fa4b8ad6e5a98bd890a8c0abd55990602070cd7687b2c77d16fe0870567a`.
+
+Informe y tres JSON privados: `/tmp/caronte-deployment.P4WcDs/unit-eight-evidence-audit.md`.
+La conciliación de operador y reanudación de ESTE recibo están preparadas como
+propuesta, no implementadas ni autorizadas. Se solicita una decisión humana;
+no se sustituye por una llamada pagada ni se reusa una aprobación antigua.
+Conservar tres observaciones menores para la lectura completa, incluida una
+concordancia de género en la voz de Ada. No declarar aprobación literaria humana.
+Mientras no llegue una decisión, seguir comprobando sin repetir esta alerta.
+
+## Conciliación autorizada y verificada: 15:00 UTC
+
+La autorización humana `call_hbOMDt1ZtzrqU1j494Wgy9Sl` aprobó únicamente los
+seis números de párrafo de esa revisión. La reserva
+`f3f5f2f9-f3bf-4294-9e85-52d4320f7816` se consumió una vez a las 14:59:21 UTC.
+La operación `caronte_reconcile_review_references` es SECURITY INVOKER, con
+search_path vacío y permisos exclusivos de servicio. No hay nueva ruta de
+navegador/trabajador ni un permiso nuevo en sus claves. El cuerpo del servidor
+fue releído idéntico al archivo de migración generado por CLI 2.120.0.
+
+La operación exige el mismo recibo/hash/respuesta original, unidad/etapa/intento,
+consumo 62.423/5.139, respuesta terminal completada sin incertidumbre y ausencia
+de lease vigente. Deriva SOLO el mapa aprobado de seis índices. Rechaza cualquier
+cambio de cita, puntuación, comentario u otro campo, citas ausentes o ambiguas,
+issues major y puntuaciones inferiores a cuatro. Conserva diagnostic completo,
+identificador, intento, hash, consumo y toda la fila histórica; no hay POST a Opus.
+Un acuse repetido no reinicia la siguiente unidad; otra aprobación se rechaza.
+
+La prueba SQL independiente comenzó RED por operación ausente; pasó GREEN en
+PostgreSQL nativo, con rol real service_role y también en Supabase alojado.
+Todos los cambios sintéticos se revirtieron con ROLLBACK: cero filas residuales.
+Se corrigió una fixture de prueba que usaba book_status=blocked, no admitido:
+el estado real del motor es failed. No se cambió la restricción ni el validador.
+La nueva prueba del motor confirma que el recibo completado salta a la novena
+unidad sin volver a consultar ni enviar la revisión octava, mantiene el binding
+y no expone su diagnóstico. La suite completa pasa: 4 de paquete y 483 Caronte
+(487), comprobaciones heredadas, validate y build. PostgreSQL nativo detenido.
+
+Relectura durable: octava revisión completed/pass, mismo
+`msg_011CfxUexUEsQW1REXCWrPRa`, intento 1, hash y consumo intactos, respuesta
+original y recibo enteros conservados; copia aprobada y mapa exactos.
+La consulta de las 15:00:25 UTC confirma Sol escribiendo `ch_02_u_03`, recibo
+`resp_0736a95911588ea3006accf609078087d2883bd7e8c87079c4` guardado, sin error.
+No se repitió Opus, no se reescribió la octava unidad y no se tocaron HTML/CSS.
+La reserva y las dos antiguas repeticiones están consumidas: nunca reutilizarlas.
+El libro completo y el piloto siguen pendientes de revisión literaria/humana/PDF.

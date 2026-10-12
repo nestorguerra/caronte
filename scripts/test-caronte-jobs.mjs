@@ -361,3 +361,45 @@ test('lost acknowledgement after persisting a handle resumes the authoritative r
   assert.equal(fresh.calls.poll, 1);
   assert.equal(fresh.writes.at(-1).step.status, 'completed');
 });
+
+test('an operator-reconciled eighth review keeps its binding and advances only the ninth draft',async()=>{
+  const unitId='ch_02_u_02';
+  const draft={unitId,paragraphs:Array.from({length:29},(_,i)=>`Verified unique passage P${i+1}.`)};
+  const dimensions=['grounding','voice','depth','futureTexture','coherence','originality','recognition','causalPlausibility'];
+  const actual=[16,13,4,24,21,22,1,27,29,23,8,15,13,14,10,9];
+  const original={unitId,verdict:'pass',scores:Object.fromEntries(dimensions.map(d=>[d,4])),issues:[],coveredUnitIds:[unitId],
+    evidence:actual.map((paragraphIndex,i)=>({dimension:dimensions[Math.floor(i/2)],unitId,
+      paragraphIndex:paragraphIndex+([3,4,5,7,8,9].includes(i)?1:0),
+      quote:draft.paragraphs[paragraphIndex-1],rationale:'Synthetic independent evidence'}))};
+  const context={contractVersion:LITERARY_CONTRACT.version,unit:{id:unitId},draft};
+  assert.throws(()=>validateArtifact('review',original,context),{code:'review_evidence_mismatch'});
+  const candidate=structuredClone(original);
+  for(const i of [3,4,5,7,8,9])candidate.evidence[i].paragraphIndex--;
+  const approved=validateArtifact('review',candidate,context);
+  const units=outline.chapters.flatMap(c=>c.units);
+  const steps=[...base];
+  for(const unit of units.slice(0,7)){
+    steps.push(completed(`draft:${unit.id}:0`,'draft',{unitId:unit.id,paragraphs:['Complete synthetic unit']},unit.id));
+    steps.push(completed(`review:${unit.id}:0`,'review',{verdict:'pass'},unit.id));
+  }
+  const originalReceipt={provider_request_id:'msg_preserved_original',attempt:1,usage:{input_tokens:62423,output_tokens:5139},
+    input_hash:hash(draft),diagnostic:{terminal:true,uncertain:false,providerStatus:'completed',artifact:original}};
+  const reconciled={...completed(`review:${unitId}:0`,'review',approved,unitId),...originalReceipt,
+    history:[{action:'approved_review_reference_reconciliation',receipt:originalReceipt}]};
+  steps.push(completed(`draft:${unitId}:0`,'draft',draft,unitId),reconciled);
+  assert.equal(planNextStep(steps).key,'draft:ch_02_u_03:0');
+  const artifacts=collectArtifacts(steps);
+  assert.equal(artifacts.approvalBindings.units[unitId],hash(draft));
+  assert.deepEqual(artifacts.reviews[unitId],approved);
+  const {input,writes,calls}=setup({steps});
+  input.provider.start=async(_request,options)=>{
+    calls.start++;assert.equal(options.provider,'openai');
+    assert.equal(writes[0].step.step_key,'draft:ch_02_u_03:0');
+    return {status:'pending',id:'resp_ninth_draft',model:'writer'};
+  };
+  input.provider.poll=async()=>{throw new Error('Must not poll the completed Opus review');};
+  assert.deepEqual(await runClaimedJob(input),{status:'queued'});
+  assert.equal(calls.start,1);assert.equal(calls.poll,0);
+  assert.deepEqual(steps.at(-1),reconciled);
+  assert.equal(JSON.stringify(publicBookJob(input.job,steps)).includes('Synthetic independent evidence'),false);
+});

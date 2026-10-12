@@ -110,6 +110,22 @@ incertidumbre, otro intento u otra aprobación. Repetir el mismo acuse no reinic
 una petición en marcha. Ni el navegador ni el trabajador tienen acceso a esa RPC.
 Una autorización no convierte una respuesta en aprobación literaria.
 
+La octava revisión conservó sus 16 citas literales, pero seis índices apuntaban
+al párrafo siguiente. La lectura completa y cotejo exacto encontraron cada cita
+en un único párrafo. Con aprobación `call_hbOMDt1ZtzrqU1j494Wgy9Sl`, la operación
+de operador `caronte_reconcile_review_references` corrigió únicamente esos seis
+índices. El validador literario no cambió y la copia lo superó antes de aplicarse.
+El RPC SECURITY INVOKER, restringido a servicio, exige recibo/hash/objeto originales,
+los seis cambios exactos, ausencia de ambigüedad y los criterios editoriales.
+Preserva toda la fila rechazada, diagnostic, consumo, ID e intento. Una repetición
+del mismo acuse es idempotente; otra aprobación o copia distinta se rechaza.
+No existe ruta ni automatismo que permita hacerlo al navegador o al trabajador.
+Pruebas RED→GREEN nativas y alojadas con ROLLBACK, cero residuos, y una prueba
+del motor verifican que la siguiente etapa no repite esa llamada de Opus.
+La reserva `f3f5f2f9-f3bf-4294-9e85-52d4320f7816` YA SE CONSUMIÓ: octava revisión
+completada, mismo recibo/intento/consumo; Sol inició la novena unidad. No reutilizar
+esa autorización para otro fallo. Leer el checkpoint para sus hashes y evidencia.
+
 La recuperación se detiene desactivando su variable. Eso no cancela una petición
 ya aceptada ni los avisos que ya funcionan en Edge. No modificar o cancelar trabajos
 automáticamente como sustituto de una decisión de operación.
