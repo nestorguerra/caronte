@@ -1,5 +1,5 @@
-import {countWords} from './caronte-literary.mjs';
-import {PRINT_TEMPLATE} from './caronte-print.mjs';
+import {countWords,resolveLiteraryContract} from './caronte-literary.mjs';
+import {PRINT_TEMPLATE,printSizesFor} from './caronte-print.mjs';
 
 export const PRINT_JOB_VERSION='caronte-a5-chunks-v1';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -11,14 +11,14 @@ const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(',')}]
 export const printJobFingerprint=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',
   new TextEncoder().encode(canonical(value)))),byte=>byte.toString(16).padStart(2,'0')).join('');
 const jsonOnly=value=>{const record={...value};delete record.bytes;return structuredClone(record);};
-const sizes=[12,12.5,13,13.5,14];
-const initial=Array.from({length:5},(_,index)=>sizes.map(size=>({key:`plan:${index}:${size}`,stage:'plan',index,size}))).flat();
+const initialFor=source=>Array.from({length:5},(_,index)=>printSizesFor(source).map(size=>({key:`plan:${index}:${size}`,stage:'plan',index,size}))).flat();
 
-function schedule(completed){
+function schedule(completed,source){
+  const initial=initialFor(source),pages=resolveLiteraryContract(source.prompt_version).physicalPages;
   for(const step of initial)if(!completed.has(step.key))return step;
   if(!completed.has('compose'))return{key:'compose',stage:'compose'};
   const manifest=completed.get('compose').output,count=manifest?.layout?.pages?.length;
-  if(!Number.isSafeInteger(count)||count<180||count>200||count%2||manifest.proof!==false)fail('print_layout_identity');
+  if(!Number.isSafeInteger(count)||count<pages.min||count>pages.max||count%2||manifest.proof!==false)fail('print_layout_identity');
   for(let firstPage=1;firstPage<=count;firstPage+=10){
     const lastPage=Math.min(firstPage+9,count),key=`part:${firstPage}:${lastPage}`;
     if(!completed.has(key))return{key,stage:'part',firstPage,lastPage};
@@ -29,7 +29,7 @@ function schedule(completed){
 function publicJob(job,steps){
   const count=steps.filter(step=>step.status==='completed').length;
   const pages=steps.find(step=>step.step_key==='compose'&&step.status==='completed')?.output?.layout?.pages?.length;
-  const total=25+1+Math.ceil((pages||200)/10)+2+1;
+  const total=initialFor(job.source_snapshot).length+1+Math.ceil((pages||resolveLiteraryContract(job.source_snapshot?.prompt_version).physicalPages.max)/10)+2+1;
   return{id:job.id,status:job.status,stage:job.stage,completedSteps:count,totalSteps:total,
     progress:job.status==='ready'?100:Math.min(98,Math.floor(count/total*100)),
     errorCode:job.error_code||null,createdAt:job.created_at,updatedAt:job.updated_at};
@@ -81,10 +81,12 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
     const source=structuredClone(row.manuscript);
     if(row.status!=='ready'||row.provider_chain?.degraded===true||['deterministic','openai_failed'].includes(row.provider_chain?.drafting)||
         ['degraded_provider_fallback','blocked_safety','needs_caronte_rewrite'].includes(row.quality_report?.status)||row.quality_report?.editorial_gate!=='pass'||
-        source?.prompt_version!=='caronte-literary-v2'||!Array.isArray(source.sections)||source.sections.length!==5||
+        !['caronte-literary-v2','caronte-literary-v3'].includes(source?.prompt_version)||!Array.isArray(source.sections)||source.sections.length!==5||
         !row.updated_at||!Number.isFinite(Date.parse(row.updated_at)))fail('print_manuscript_not_approved');
     const words=countWords(source.sections.flatMap(chapter=>chapter.paragraphs||[]).join(' '));
-    if(words<45000||words>55000)fail('print_manuscript_word_count');
+    const contract=resolveLiteraryContract(source.prompt_version);
+    if(words<contract.manuscriptWords.min||words>contract.manuscriptWords.max)fail('print_manuscript_word_count');
+    if(source.future_age!==source.current_age+contract.horizonYears)fail('print_manuscript_not_approved');
     const config=await settings();
     if(!['sandbox','production'].includes(config?.environment)||!/^[a-f0-9]{64}$/.test(config.configurationTag)||
         typeof config.podPackageId!=='string'||!config.podPackageId)fail('print_lulu_credentials_required');
@@ -129,7 +131,7 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
           completed.set(record.step_key,record);
         }
       }
-      const next=schedule(completed),previous=steps.find(record=>record.step_key===next.key);
+      const next=schedule(completed,job.source_snapshot),previous=steps.find(record=>record.step_key===next.key);
       const inputHash=await printJobFingerprint({jobId:job.id,pdfId:job.pdf_id,version:job.version,
         source:job.source_sha256,identity:job.input_hash,createdAt:new Date(job.created_at).toISOString(),stage:next,
         receipts:[...completed].sort(([a],[b])=>a.localeCompare(b)).map(([key,value])=>[key,value.output_hash])});
@@ -165,6 +167,7 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
             byte_size:interior.byteSize,cover_byte_size:cover.byteSize,font_size:manifest.layout.size,
             leading:manifest.layout.leading,margins:manifest.layout.margins,chapter_starts:manifest.layout.chapterStarts},
           metadata:{template:PRINT_TEMPLATE,storage_mode:'private_storage_primary',artifact_id:job.id,print_job_id:job.id,
+            ...(source.prompt_version==='caronte-literary-v3'?{literary_contract_version:source.prompt_version}:{}),
             storage_verified:true,lulu_dimensions_called:true,lulu_preflight_called:false,lulu_order_created:false,
             lulu_credential_tag:job.lulu_configuration_tag}};
         try{if(await rpc('caronte_finish_print_job',{p_job_id:job.id,p_lease_token:job.lease_token,p_pdf:pdf})!==job.pdf_id)fail('print_storage_unavailable');}
@@ -188,7 +191,7 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
       }
       let output;
       if(next.stage==='plan')output=await stages.planChapter(source,next.index,{size:next.size});
-      else if(next.stage==='compose')output=await stages.composeLayout(source,initial.map(value=>completed.get(value.key).output),
+      else if(next.stage==='compose')output=await stages.composeLayout(source,initialFor(source).map(value=>completed.get(value.key).output),
         {createdAt:new Date(job.created_at).toISOString(),proof:false});
       else if(next.stage==='part')output=await stages.renderInteriorPart(source,manifest,next);
       else if(next.stage==='interior'){

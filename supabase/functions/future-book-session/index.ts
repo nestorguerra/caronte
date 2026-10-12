@@ -2,6 +2,7 @@ import { jsonResponse } from '../_shared/cors.ts';
 import { callOpenAiJson } from '../_shared/ai.ts';
 import { clientIp, encodeParam, getUser, hasServiceConfig, rest, userAgent, serviceRoleKey, supabaseUrl } from '../_shared/service.ts';
 import { createBookEngine } from '../_shared/caronte-engine.mjs';
+import { anthropicRequestHeaders } from '../_shared/caronte-models.mjs';
 import { renderPrintBundle, loadPrintStages } from '../_shared/caronte-print-runtime.mjs';
 import { createPrintArchive, createPrintFileAccess, createPrintStageArchive } from '../_shared/caronte-print-storage.mjs';
 import { createPrintEngine } from '../_shared/caronte-print-engine.mjs';
@@ -1116,13 +1117,9 @@ async function reviewWithAnthropic(
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json'
-    },
+    headers: anthropicRequestHeaders(apiKey, Deno.env.get('FUTURE_BOOK_ANTHROPIC_WORKSPACE_ID') || Deno.env.get('ANTHROPIC_WORKSPACE_ID')),
     body: JSON.stringify({
-      model: Deno.env.get('ANTHROPIC_MODEL') || 'claude-opus-4-7',
+      model: Deno.env.get('FUTURE_BOOK_REVIEWER_MODEL') || Deno.env.get('ANTHROPIC_MODEL') || 'claude-opus-5-5',
       max_tokens: 1800,
       system: 'Eres control de calidad editorial de Caronte. Detectas genericidad, promesas de prediccion, lenguaje clinico, vaguedad, baja personalizacion y contradicciones. Devuelves JSON.',
       messages: [{
@@ -1161,7 +1158,7 @@ async function reviewWithAnthropic(
   const parsed = parseJsonObject(text);
   return {
     provider: 'anthropic',
-    model: data.model || Deno.env.get('ANTHROPIC_MODEL') || 'claude-opus-4-7',
+    model: data.model || Deno.env.get('FUTURE_BOOK_REVIEWER_MODEL') || Deno.env.get('ANTHROPIC_MODEL') || 'claude-opus-5-5',
     status: 'completed',
     usage: data.usage || {},
     result: parsed || { raw: safeLongText(text, '', 2400) }
@@ -3316,10 +3313,13 @@ function publicManuscript(row: Record<string, unknown> | null) {
 
 async function bookModelSettings() {
   const [openaiKey, anthropicKey] = await Promise.all([providerSecret('openai'), providerSecret('anthropic')]);
+  const writerModel = Deno.env.get('FUTURE_BOOK_WRITER_MODEL') || Deno.env.get('FUTURE_BOOK_OPENAI_MODEL') || Deno.env.get('OPENAI_MODEL') || 'gpt-6.1-sol';
   return {
     openaiKey, anthropicKey,
-    writerModel: Deno.env.get('FUTURE_BOOK_WRITER_MODEL') || Deno.env.get('FUTURE_BOOK_OPENAI_MODEL') || Deno.env.get('OPENAI_MODEL') || '',
-    reviewerModel: Deno.env.get('FUTURE_BOOK_REVIEWER_MODEL') || Deno.env.get('ANTHROPIC_MODEL') || ''
+    writerModel,
+    writerReasoningEffort: Deno.env.get('FUTURE_BOOK_WRITER_REASONING_EFFORT') || (writerModel === 'gpt-6.1-sol' ? 'xhigh' : undefined),
+    anthropicWorkspaceId: Deno.env.get('FUTURE_BOOK_ANTHROPIC_WORKSPACE_ID') || Deno.env.get('ANTHROPIC_WORKSPACE_ID'),
+    reviewerModel: Deno.env.get('FUTURE_BOOK_REVIEWER_MODEL') || Deno.env.get('ANTHROPIC_MODEL') || 'claude-opus-5-5'
   };
 }
 
@@ -3341,7 +3341,9 @@ function bookEngine() {
 }
 
 async function advanceBook(req: Request, payload: Record<string, unknown>) {
-  if (!serviceRoleKey || req.headers.get('authorization') !== `Bearer ${serviceRoleKey}`) {
+  const bookSecret = Deno.env.get('CARONTE_BOOK_WORKER_SECRET') || '';
+  const bookWorker = Boolean(bookSecret && req.headers.get('x-caronte-book-worker-secret') === bookSecret);
+  if (!bookWorker && (!serviceRoleKey || req.headers.get('authorization') !== `Bearer ${serviceRoleKey}`)) {
     await requireFutureBookMonitorCaller(req, payload);
   }
   const jobId = payload.jobId == null ? null : String(payload.jobId);
@@ -3596,6 +3598,8 @@ async function generateProductionPrintPdf(row: Record<string, unknown>, manuscri
       byte_size: bundle.interior.byteSize, cover_byte_size: bundle.cover.byteSize, font_size: bundle.layout.size,
       leading: bundle.layout.leading, margins: bundle.layout.margins, chapter_starts: bundle.layout.chapterStarts },
     metadata: { template: bundle.interior.template, storage_mode: 'private_storage_primary', artifact_id: storage.artifactId,
+      ...(String((manuscript.manuscript as Record<string, unknown>).prompt_version)==='caronte-literary-v3'
+        ? {literary_contract_version:'caronte-literary-v3'} : {}),
       storage_verified: true, lulu_dimensions_called: true, lulu_preflight_called: false, lulu_order_created: false }
   } })) as Record<string, unknown> | null;
   if (!created?.id) throw new Error('print_bundle_persistence_unverified');
@@ -3624,7 +3628,7 @@ async function generatePdf(req: Request, payload: Record<string, unknown>) {
 
   const degraded = manuscriptIsDegraded(manuscript);
   const source = manuscript.manuscript as Record<string, unknown>;
-  if (source.prompt_version === 'caronte-literary-v2') {
+  if (['caronte-literary-v2','caronte-literary-v3'].includes(String(source.prompt_version))) {
     if (!printQueueEnabled()) throw new Error('print_queue_disabled');
     try {
       const result = await printEngine().enqueue(String(row.id), manuscript);
@@ -4780,6 +4784,24 @@ async function readPrintPdf(pdfId: string) {
   return first(await printDatabaseRest(`future_book_pdfs?id=eq.${encodeParam(pdfId)}&select=*&limit=1`)) as Record<string, unknown> | null;
 }
 
+function printTimestampMicros(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}(?::?\d{2})?)$/.exec(value);
+  if (!match) return null;
+  const zone = /^[+-]\d{2}$/.test(match[3]) ? `${match[3]}:00` : match[3];
+  const seconds = Date.parse(`${match[1].replace(' ', 'T')}${zone}`);
+  if (!Number.isFinite(seconds)) return null;
+  return BigInt(seconds) * 1000n + BigInt((match[2] || '').padEnd(6, '0'));
+}
+
+function printStoredFieldMatches(field: string, actual: unknown, expected: unknown) {
+  if (['reviewed_at', 'released_at'].includes(field) && actual != null && expected != null) {
+    const saved = printTimestampMicros(actual), requested = printTimestampMicros(expected);
+    return saved !== null && requested !== null && saved === requested;
+  }
+  return printJson(actual) === printJson(expected);
+}
+
 async function compareAndSetPrintPdf(current: Record<string, unknown>, body: Record<string, unknown>) {
   if (!current.updated_at) throw new Error('print_row_revision_missing');
   const changed = first(await printDatabaseRest(`future_book_pdfs?id=eq.${encodeParam(String(current.id))}&updated_at=eq.${encodeParam(String(current.updated_at))}`, {
@@ -4788,7 +4810,7 @@ async function compareAndSetPrintPdf(current: Record<string, unknown>, body: Rec
   if (!changed?.id) return null;
   const confirmed = await readPrintPdf(String(current.id));
   if (!confirmed || confirmed.updated_at !== changed.updated_at ||
-      Object.keys(body).some(key => printJson(confirmed[key]) !== printJson(body[key]))) throw new Error('print_row_readback_unverified');
+      Object.keys(body).some(key => !printStoredFieldMatches(key, confirmed[key], body[key]))) throw new Error('print_row_readback_unverified');
   return confirmed;
 }
 
@@ -5680,13 +5702,9 @@ async function testProviderConnectivity(provider: string) {
   if (provider === 'anthropic') {
     const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json'
-      },
+      headers: anthropicRequestHeaders(apiKey, Deno.env.get('FUTURE_BOOK_ANTHROPIC_WORKSPACE_ID') || Deno.env.get('ANTHROPIC_WORKSPACE_ID')),
       body: JSON.stringify({
-        model: Deno.env.get('ANTHROPIC_MODEL') || 'claude-opus-4-7',
+        model: Deno.env.get('FUTURE_BOOK_REVIEWER_MODEL') || Deno.env.get('ANTHROPIC_MODEL') || 'claude-opus-5-5',
         max_tokens: 8,
         messages: [{ role: 'user', content: 'ping' }]
       })

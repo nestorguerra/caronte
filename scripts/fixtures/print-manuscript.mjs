@@ -18,3 +18,14 @@ export function printManuscript() {
     }))
   };
 }
+
+export function printManuscriptThirty(){
+  const source=printManuscript();
+  source.future_age=80;source.prompt_version='caronte-literary-v3';
+  source.target_pages={min:216,max:224,verified:false};
+  for(const chapter of source.sections)chapter.paragraphs=chapter.paragraphs.map(paragraph=>{
+    const words=paragraph.split(' '),body=words.slice(1,-1);
+    return [words[0],...Array.from({length:400},(_,i)=>body[i%body.length]),words.at(-1)].join(' ');
+  });
+  return source;
+}

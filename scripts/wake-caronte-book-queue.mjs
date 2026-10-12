@@ -21,11 +21,15 @@ export function recoveryEndpoint(projectValue,functionsValue) {
 
 // This is a single recovery signal, not a submission loop or a completion proof.
 // Claim/lease eligibility and uncertain-provider handling belong to the server.
-export async function wakeBookQueue({enabled=false,projectUrl,functionsBaseUrl,monitorSecret,
+export async function wakeBookQueue({enabled=false,projectUrl,functionsBaseUrl,monitorSecret,workerSecret,
   fetchImpl=globalThis.fetch,timeoutMs=15000}={}) {
   if(enabled!==true)return receipt('disabled');
   const url=recoveryEndpoint(projectUrl,functionsBaseUrl);
-  if(typeof monitorSecret!=='string'||!monitorSecret||monitorSecret.length>4096||/\s/u.test(monitorSecret)
+  // The explicit monitor path remains for already-approved operator callers.
+  // The scheduled CLI below reads only its dedicated, narrowly scoped key.
+  const credential=workerSecret===undefined?monitorSecret:workerSecret;
+  const credentialHeader=workerSecret===undefined?'x-future-book-monitor-secret':'x-caronte-book-worker-secret';
+  if(typeof credential!=='string'||!credential||credential.length>4096||/\s/u.test(credential)
     ||typeof fetchImpl!=='function'||!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000){
     fail('book_recovery_configuration_invalid');
   }
@@ -35,7 +39,7 @@ export async function wakeBookQueue({enabled=false,projectUrl,functionsBaseUrl,m
   });
   const operation=(async()=>{
     response=await fetchImpl(url,{method:'POST',redirect:'error',signal:controller.signal,
-      headers:{'content-type':'application/json','x-future-book-monitor-secret':monitorSecret},
+      headers:{'content-type':'application/json',[credentialHeader]:credential},
       body:JSON.stringify({action:'advanceBook'})});
     if(!response.ok){void response.body?.cancel().catch(()=>{});fail('book_recovery_http_error');}
     let result;
@@ -57,7 +61,7 @@ export async function runBookRecovery({env=process.env,fetchImpl=globalThis.fetc
     const enabled=env.CARONTE_BOOK_RECOVERY_ENABLED==='true';
     const result=enabled?await wakeBookQueue({enabled,
       projectUrl:env.SUPABASE_URL,functionsBaseUrl:env.FUNCTIONS_BASE_URL,
-      monitorSecret:env.FUTURE_BOOK_MONITOR_SECRET,fetchImpl}):receipt('disabled');
+      workerSecret:env.CARONTE_BOOK_WORKER_SECRET??'',fetchImpl}):receipt('disabled');
     write(JSON.stringify({event:'caronte_book_recovery',...result}));return 0;
   }catch(error){
     write(JSON.stringify({event:'caronte_book_recovery',...receipt('failed'),

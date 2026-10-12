@@ -9,6 +9,7 @@ import {wakeBookQueue} from './wake-caronte-book-queue.mjs';
 const jobId = '948bc512-eaf8-4f2c-8ae8-c302561ca8d4';
 const serviceKey = 'synthetic-worker-service-key';
 const monitorSecret = 'synthetic-worker-monitor-secret';
+const bookWorkerSecret = 'synthetic-dedicated-book-worker-secret';
 const projectUrl = 'https://synthetic-worker.supabase.co';
 const fakeFunctionBearer = 'function serviceRoleKey() { return "synthetic-worker-service-key"; }';
 const privateFailure = 'private-synthetic-provider-detail https://private.example.test/?token=private-synthetic-token';
@@ -34,7 +35,8 @@ function fixture({edge = true, missingKey = false, wakeFailure = null, claimFail
     SUPABASE_SERVICE_ROLE_KEY: missingKey ? '' : serviceKey,
     SUPABASE_ANON_KEY: 'synthetic-worker-anon-key',
     FUTURE_BOOK_ADMIN_TOKEN: 'synthetic-worker-admin-token',
-    FUTURE_BOOK_MONITOR_SECRET: monitorSecret
+    FUTURE_BOOK_MONITOR_SECRET: monitorSecret,
+    CARONTE_BOOK_WORKER_SECRET: bookWorkerSecret
   };
   const requests = [], tasks = [], delays = [], logs = [];
   let handler, cancelledBodies = 0;
@@ -142,6 +144,21 @@ test('anonymous, foreign and function-shaped bearers cannot claim work or bypass
     }), {}), /Invalid admin token/);
     assert.equal(app.claims().length, 0);
   }
+});
+
+test('the dedicated book credential can advance an existing job but cannot enter admin or print routes',async()=>{
+ const app=fixture({edge:false});
+ const headers={'x-caronte-book-worker-secret':bookWorkerSecret};
+ const accepted=await app.dispatch({action:'advanceBook',jobId},undefined,headers);
+ assert.equal(accepted.status,200);assert.equal((await accepted.json()).status,'idle');
+ assert.equal(app.claims().length,1);assert.equal(app.authCalls().length,0);
+ for(const action of ['adminDashboard','adminValidatePrint','advancePrint','runFutureBookMonitor']){
+  const denied=await app.dispatch({action},undefined,headers);
+  assert.equal(denied.status,400,action);assert.equal(app.claims().length,1);
+ }
+ const bad=fixture();
+ const denied=await bad.dispatch({action:'advanceBook',jobId},undefined,{'x-caronte-book-worker-secret':'wrong'});
+ assert.equal(denied.status,400);assert.equal(bad.claims().length,0);
 });
 
 test('the exact service bearer advances one UUID through the real claim RPC without admin auth', async () => {

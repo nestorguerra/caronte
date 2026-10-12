@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createBookEngine } from '../supabase/functions/_shared/caronte-engine.mjs';
+import {LITERARY_CONTRACT} from '../supabase/functions/_shared/caronte-literary.mjs';
 
 const session = { id: '11111111-1111-4111-8111-111111111111', status: 'interview_completed', question_count: 2, created_at: '2026-09-08T00:00:00Z' };
 const answers = [
@@ -47,10 +48,38 @@ test('enqueue preserves complete interview, snapshots models without credentials
   assert.equal(first.job.id, again.job.id);
   assert.equal(first.manuscript, null);
   assert.equal(db.job.interview.sources[0].transcript, answers[0].transcript);
-  assert.deepEqual(db.job.model_config, { writerModel: 'writer-configured', reviewerModel: 'reviewer-configured' });
+  assert.deepEqual(db.job.model_config, { writerModel: 'writer-configured', reviewerModel: 'reviewer-configured',literaryContract:LITERARY_CONTRACT });
   assert.equal(JSON.stringify(first).includes('Memoria completa'), false);
   assert.equal(JSON.stringify(db.job).includes('test-key'), false);
   assert.ok(wakes.includes(first.job.id));
+});
+
+test('a durable book keeps its approved model and reasoning snapshot after server settings change', async () => {
+  const db = database();
+  let current = { ...await settings(), writerModel: 'gpt-6.1-sol', reviewerModel: 'claude-opus-5-5',
+    writerReasoningEffort: 'xhigh', anthropicWorkspaceId: 'wrkspc_private123' };
+  const engine = createBookEngine({ rest: db.rest, settings: async () => current, fetchImpl: async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.equal(body.model, 'gpt-6.1-sol');
+    assert.deepEqual(body.reasoning, { effort: 'xhigh' });
+    return Response.json({ id: 'resp_snapshot', status: 'queued', model: 'gpt-6.1-sol' });
+  } });
+  await engine.enqueue(session, answers);
+  assert.deepEqual(db.job.model_config, { writerModel: 'gpt-6.1-sol', reviewerModel: 'claude-opus-5-5', writerReasoningEffort: 'xhigh',literaryContract:LITERARY_CONTRACT });
+  current = { ...current, writerModel: 'different-writer', writerReasoningEffort: 'low' };
+  assert.equal((await engine.advance(db.job.id)).status, 'queued');
+  assert.equal(JSON.stringify(db.job.model_config).includes('private123'), false);
+});
+test('unsupported old jobs and altered contract snapshots block before any provider request',async()=>{
+  for(const change of [job=>{job.prompt_version='caronte-longform-v1';delete job.model_config.literaryContract;},
+    job=>{job.model_config.literaryContract.horizonYears=40;}]){
+    const db=database();let requests=0;
+    const engine=createBookEngine({rest:db.rest,settings,fetchImpl:async()=>{requests++;throw new Error('must not call a provider');}});
+    await engine.enqueue(session,answers);change(db.job);
+    const result=await engine.advance(db.job.id);
+    assert.equal(result.status,'blocked');assert.equal(result.errorCode,'book_contract_unsupported');
+    assert.equal(requests,0);assert.equal(db.job.status,'blocked');
+  }
 });
 
 test('incomplete, duplicated or gapped answers do not enqueue a paid job', async () => {

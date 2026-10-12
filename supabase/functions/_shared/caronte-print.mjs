@@ -1,16 +1,20 @@
 // One renderer for Node verification and the server. No network or paid action.
-import {countWords} from './caronte-literary.mjs';
+import {countWords,resolveLiteraryContract} from './caronte-literary.mjs';
 import {createPrintWidthMeasure as measure, wrapPrintText as wrap} from './caronte-print-wrap.mjs';
 import {FONT_ASSETS} from './caronte-print-fonts.mjs';
 
 export const PRINT_TEMPLATE = 'caronte-a5-embedded-v2';
+export function printSizesFor(source){
+  return source?.prompt_version==='caronte-literary-v3'
+    ?Array.from({length:21},(_,i)=>Math.round((12+i/10)*10)/10):[12,12.5,13,13.5,14];
+}
 const W = 419.76, H = 595.44, INNER = 72, OUTER = 36, BOTTOM = 54;
 const TEXT_WIDTH = W - INNER - OUTER;
 const fail = code => { throw new Error(code); };
 const normal = text => text.normalize('NFC').replace(/\s+/gu, ' ').trim();
 
 export function prototypeCoverDimensions(pageCount) {
-  if (!Number.isSafeInteger(pageCount) || pageCount < 180 || pageCount > 200) fail('print_page_count');
+  if (!Number.isSafeInteger(pageCount) || !(pageCount>=180&&pageCount<=200||pageCount>=216&&pageCount<=224)) fail('print_page_count');
   const spine = (pageCount / 444 + 0.06) * 72;
   return {width: 2 * W + spine + 18, height: H + 18, spine, bleed: 9,
     pageCount, source: 'lulu-guide-prototype'};
@@ -18,10 +22,11 @@ export function prototypeCoverDimensions(pageCount) {
 
 function validateSource(manuscript) {
   const source = structuredClone(manuscript);
+  const contract=resolveLiteraryContract(source?.prompt_version);
   if (!source || !Array.isArray(source.sections) || source.sections.length !== 5 ||
       source.sections.some(section => section.kind !== 'chapter')) fail('print_five_chapters_required');
   if (!Number.isSafeInteger(source.current_age) || source.current_age < 1 || source.current_age > 120 ||
-      source.future_age !== source.current_age + 40) fail('print_age_horizon_mismatch');
+      source.future_age !== source.current_age + contract.horizonYears) fail('print_age_horizon_mismatch');
   if (typeof source.title !== 'string' || !normal(source.title) ||
       typeof source.subtitle !== 'string' || !normal(source.subtitle)) fail('print_title_required');
   for (const chapter of source.sections) {
@@ -30,7 +35,7 @@ function validateSource(manuscript) {
         chapter.paragraphs.some(text => typeof text !== 'string' || !normal(text))) fail('print_paragraph_required');
   }
   const words = countWords(source.sections.flatMap(chapter => chapter.paragraphs).join('\n\n'));
-  if (words < 45000 || words > 55000) fail('print_manuscript_word_count');
+  if (words < contract.manuscriptWords.min || words > contract.manuscriptWords.max) fail('print_manuscript_word_count');
   return {source, words};
 }
 
@@ -106,14 +111,16 @@ function planBook(source, size, leading, widths, chapterOffset = 0) {
 }
 
 function chooseLayout(source, fonts) {
+  const pages=resolveLiteraryContract(source.prompt_version).physicalPages;
   const widths = Object.fromEntries(Object.entries(fonts).map(([key, font]) => [key, measure(font)]));
   const candidates = [];
-  for (const size of [12, 12.5, 13, 13.5, 14]) {
+  for (const size of printSizesFor(source)) {
     const layout = planBook(source, size, size * 1.4, widths);
-    if (layout.pages.length >= 180 && layout.pages.length <= 200) candidates.push(layout);
+    if (layout.pages.length >= pages.min && layout.pages.length <= pages.max) candidates.push(layout);
   }
   if (!candidates.length) fail('print_pagination_needs_revision');
-  return candidates.sort((a, b) => Math.abs(a.pages.length - 190) - Math.abs(b.pages.length - 190))[0];
+  const target=pages.target??(pages.min+pages.max)/2;
+  return candidates.sort((a, b) => Math.abs(a.pages.length - target) - Math.abs(b.pages.length - target))[0];
 }
 
 function drawWrapped(page, text, font, size, x, top, width, leading, color) {
@@ -216,7 +223,7 @@ async function sha256(bytes) {
     byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-const PRINT_SIZES = Object.freeze([12, 12.5, 13, 13.5, 14]);
+const PRINT_SIZES = Object.freeze(Array.from({length:21},(_,i)=>Math.round((12+i/10)*10)/10));
 const STAGES_VERSION = 'caronte-a5-chunks-v1';
 const clone = value => structuredClone(value);
 const json = value => Array.isArray(value) ? `[${value.map(json).join(',')}]` :
@@ -259,6 +266,7 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
   };
   const validateManifest = async (manuscript, input) => {
     const current = await identity(manuscript), manifest = clone(input);
+    const pages=resolveLiteraryContract(current.source.prompt_version).physicalPages;
     if (!manifest || manifest.template !== PRINT_TEMPLATE || manifest.stagesVersion !== STAGES_VERSION || manifest.sourceFingerprint !== current.sourceFingerprint ||
         manifest.fontFingerprint !== current.fontFingerprint || manifest.wordCount !== current.words) fail('print_layout_identity');
     if (manifest.manifestHash !== await jsonHash(without(manifest, 'manifestHash')) ||
@@ -266,10 +274,10 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
     const layout = manifest.layout;
     if (typeof manifest.createdAt !== 'string' || !Number.isFinite(Date.parse(manifest.createdAt)) ||
         new Date(manifest.createdAt).toISOString() !== manifest.createdAt || typeof manifest.proof !== 'boolean' ||
-        !PRINT_SIZES.includes(layout?.size) || layout.leading !== layout.size * 1.4 ||
+        !printSizesFor(current.source).includes(layout?.size) || layout.leading !== layout.size * 1.4 ||
         layout.textWidth !== TEXT_WIDTH || !layout.mirroredMargins || layout.margins?.inside !== INNER ||
         layout.margins?.outside !== OUTER || layout.margins?.bottom !== BOTTOM || !Array.isArray(layout.pages) ||
-        layout.pages.length < 180 || layout.pages.length > 200 || layout.pages.length % 2 ||
+        layout.pages.length < pages.min || layout.pages.length > pages.max || layout.pages.length % 2 ||
         layout.paragraphCount !== current.source.sections.reduce((count, chapter) => count + chapter.paragraphs.length, 0)) fail('print_layout_manifest_corrupt');
     for (const [index, page] of layout.pages.entries()) {
       if (page.number !== index + 1 || !Array.isArray(page.lines) ||
@@ -309,6 +317,7 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
       if (!Number.isSafeInteger(chapterIndex) || chapterIndex < 0 || chapterIndex > 4 ||
           !PRINT_SIZES.includes(options.size)) fail('print_chapter_plan_scope');
       const current = await identity(manuscript), {embedded} = await document(current.source);
+      if(!printSizesFor(current.source).includes(options.size))fail('print_chapter_plan_scope');
       const widths = Object.fromEntries(Object.entries(embedded).map(([name, font]) => [name, measure(font)]));
       const candidates = [options.size].map(size => {
         const layout = planBook({...current.source, sections: [current.source.sections[chapterIndex]]}, size, size * 1.4, widths, chapterIndex);
@@ -320,7 +329,8 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
     },
     async composeLayout(manuscript, input, options = {}) {
       const current = await identity(manuscript), chapters = clone(input);
-      if (!Array.isArray(chapters) || chapters.length !== 25 ||
+      const sizes=printSizesFor(current.source),expected=5*sizes.length;
+      if (!Array.isArray(chapters) || chapters.length !== expected ||
           chapters.some(chapter => !Number.isSafeInteger(chapter?.chapterIndex) || chapter.chapterIndex < 0 || chapter.chapterIndex > 4)) fail('print_chapter_plans_required');
       chapters.sort((a, b) => a.chapterIndex - b.chapterIndex);
       for (const chapter of chapters) {
@@ -328,7 +338,7 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
             chapter.fontFingerprint !== current.fontFingerprint) fail('print_chapter_plan_identity');
         if (chapter.sha256 !== await jsonHash(without(chapter, 'sha256')) || !Array.isArray(chapter.candidates) ||
             chapter.candidates.length !== 1 ||
-            chapter.candidates.some(candidate => !PRINT_SIZES.includes(candidate.size))) fail('print_chapter_plan_corrupt');
+            chapter.candidates.some(candidate => !sizes.includes(candidate.size))) fail('print_chapter_plan_corrupt');
       }
       const matrix = new Map();
       for (const chapter of chapters) for (const candidate of chapter.candidates) {
@@ -336,8 +346,8 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
         if (matrix.has(key)) fail('print_chapter_plans_required');
         matrix.set(key, candidate);
       }
-      if (matrix.size !== 25) fail('print_chapter_plans_required');
-      const candidates = PRINT_SIZES.map(size => {
+      if (matrix.size !== expected) fail('print_chapter_plans_required');
+      const candidates = sizes.map(size => {
         const pages = [{number: 1, kind: 'title', lines: []}, {number: 2, kind: 'edition', lines: []},
           {number: 3, kind: 'contents', lines: []}, {number: 4, kind: 'recto_blank', lines: []}];
         const chapterStarts = []; let paragraphCount = 0;
@@ -355,9 +365,14 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
         }
         return {pages, chapterStarts, paragraphCount, textWidth: TEXT_WIDTH, size, leading: size * 1.4,
           margins: {inside: INNER, outside: OUTER, bottom: BOTTOM}, mirroredMargins: true};
-      }).filter(layout => layout.pages.length >= 180 && layout.pages.length <= 200);
+      }).filter(layout => {
+        const pages=resolveLiteraryContract(current.source.prompt_version).physicalPages;
+        return layout.pages.length>=pages.min&&layout.pages.length<=pages.max;
+      });
       if (!candidates.length) fail('print_pagination_needs_revision');
-      const layout = candidates.sort((a, b) => Math.abs(a.pages.length - 190) - Math.abs(b.pages.length - 190))[0];
+      const pageTarget=resolveLiteraryContract(current.source.prompt_version).physicalPages;
+      const target=pageTarget.target??(pageTarget.min+pageTarget.max)/2;
+      const layout = candidates.sort((a, b) => Math.abs(a.pages.length - target) - Math.abs(b.pages.length - target))[0];
       const timestamp = options.createdAt ?? new Date().toISOString();
       if (typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp))) fail('print_job_timestamp_required');
       const manifest = {template: PRINT_TEMPLATE, stagesVersion: STAGES_VERSION,
@@ -388,7 +403,8 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
     },
     async mergeInterior(manuscript, input, values) {
       const {source, manifest} = await validateManifest(manuscript, input);
-      if (!Array.isArray(values) || !values.length || values.length > 20) fail('print_parts_incomplete');
+      const maxParts=Math.ceil(resolveLiteraryContract(source.prompt_version).physicalPages.max/10);
+      if (!Array.isArray(values) || !values.length || values.length > maxParts) fail('print_parts_incomplete');
       if (values.some(part => !(part?.bytes instanceof Uint8Array)) ||
           values.reduce((sum, part) => sum + part.bytes.length, 0) > 20_000_000) fail('print_parts_size');
       const parts = [...values].sort((a, b) => a.firstPage - b.firstPage);
@@ -448,7 +464,8 @@ async function renderBundle(doc, fonts, source, words, options, PDFDocument, fon
   const bytes = await doc.save({useObjectStreams: false});
   const reopened = await PDFDocument.load(bytes);
   const pageCount = reopened.getPageCount();
-  if (pageCount !== layout.pages.length || pageCount < 180 || pageCount > 200) fail('print_page_count');
+  const physicalPages=resolveLiteraryContract(source.prompt_version).physicalPages;
+  if (pageCount !== layout.pages.length || pageCount < physicalPages.min || pageCount > physicalPages.max) fail('print_page_count');
   // Resolve production dimensions only after the actual interior page count exists.
   const dimensions = typeof options.coverDimensions === 'function'
     ? await options.coverDimensions(pageCount) : options.coverDimensions;

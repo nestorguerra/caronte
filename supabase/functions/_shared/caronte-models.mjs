@@ -14,6 +14,7 @@
 
 const PROVIDERS = new Set(['openai', 'anthropic']);
 const OPENAI_PROMPT_JSON_MODELS = new Set(['gpt-5.4-pro', 'gpt-5.4-pro-2026-03-05']);
+const WRITER_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const MODEL_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/;
 const RESPONSE_ID = /^(resp|msg)_[a-zA-Z0-9_-]{1,200}$/;
 const PROVIDER_STATUSES = new Set(['queued', 'in_progress', 'completed', 'failed', 'cancelled', 'incomplete', 'end_turn', 'refusal', 'max_tokens', 'pause_turn', 'stop_sequence', 'tool_use', 'model_context_window_exceeded']);
@@ -54,9 +55,43 @@ function validateRequest(request, requestKey) {
   }
 }
 
+// Organisation-scoped Anthropic keys require the approved workspace header.
+// https://platform.claude.com/docs/en/api/authentication
+export function anthropicRequestHeaders(apiKey, workspaceId) {
+  if (typeof apiKey !== 'string' || !apiKey.trim() || /[\r\n]/.test(apiKey)
+    || (workspaceId != null && workspaceId !== '' && (typeof workspaceId !== 'string' || !/^wrkspc_[A-Za-z0-9]+$/.test(workspaceId)))) {
+    throw error('provider_config_invalid', { terminal: true });
+  }
+  return { 'x-api-key': apiKey.trim(), 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json',
+    ...(workspaceId ? { 'anthropic-workspace-id': workspaceId } : {}) };
+}
+
+// Raw JSON schemas cannot send these constraints to Claude. Keep their meaning
+// in descriptions; validateArtifact still enforces the original literary schema.
+// https://platform.claude.com/docs/en/build-with-claude/structured-outputs#json-schema-limitations
+function anthropicOutputSchema(schema) {
+  const result = structuredClone(schema);
+  function visit(node) {
+    if (!isObject(node)) return;
+    const limits = {};
+    for (const key of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf', 'minLength', 'maxLength', 'maxItems', 'uniqueItems']) {
+      if (Object.hasOwn(node, key)) { limits[key] = node[key]; delete node[key]; }
+    }
+    if (Object.hasOwn(node, 'minItems') && ![0, 1].includes(node.minItems)) { limits.minItems = node.minItems; delete node.minItems; }
+    if (Object.keys(limits).length) node.description = `${node.description ? `${node.description} ` : ''}Required constraints: ${JSON.stringify(limits)}`;
+    if (isObject(node.properties)) Object.values(node.properties).forEach(visit);
+    visit(node.items);
+    for (const key of ['anyOf', 'allOf', 'oneOf']) if (Array.isArray(node[key])) node[key].forEach(visit);
+    for (const key of ['$defs', 'definitions']) if (isObject(node[key])) Object.values(node[key]).forEach(visit);
+  }
+  visit(result);
+  return result;
+}
+
 /**
  * @param {{openaiKey?:string, anthropicKey?:string, writerModel?:string,
- * reviewerModel?:string, fetchImpl?:typeof fetch, timeoutMs?:number}} options
+ * reviewerModel?:string, anthropicWorkspaceId?:string, writerReasoningEffort?:string,
+ * fetchImpl?:typeof fetch, timeoutMs?:number}} options
  * @returns {{start: Function, poll: Function}}
  * Success: {status:'pending', id, provider, model} or
  * {status:'completed', id, provider, model, usage, parsed}.
@@ -64,8 +99,12 @@ function validateRequest(request, requestKey) {
  * (provider, id, httpStatus, providerStatus). No provider text or cause is exposed.
  * A terminal generation failure retains its id; it is never returned as pending.
  */
-export function createBookModelClient({ openaiKey, anthropicKey, writerModel, reviewerModel, fetchImpl = globalThis.fetch, timeoutMs = 60000 } = {}) {
+export function createBookModelClient({ openaiKey, anthropicKey, writerModel, reviewerModel, anthropicWorkspaceId, writerReasoningEffort, fetchImpl = globalThis.fetch, timeoutMs = 60000 } = {}) {
   if (typeof fetchImpl !== 'function' || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 300000) {
+    throw error('provider_config_invalid', { terminal: true });
+  }
+  if ((writerReasoningEffort != null && !WRITER_EFFORTS.has(writerReasoningEffort))
+    || (anthropicWorkspaceId != null && anthropicWorkspaceId !== '' && (typeof anthropicWorkspaceId !== 'string' || !/^wrkspc_[A-Za-z0-9]+$/.test(anthropicWorkspaceId)))) {
     throw error('provider_config_invalid', { terminal: true });
   }
 
@@ -173,20 +212,21 @@ export function createBookModelClient({ openaiKey, anthropicKey, writerModel, re
         : request.system;
       body = JSON.stringify(provider === 'openai' ? {
         model, background: true, store: true, max_output_tokens: request.maxOutputTokens,
+        ...(writerReasoningEffort ? { reasoning: { effort: writerReasoningEffort } } : {}),
         input: [{ role: 'system', content: system }, { role: 'user', content: request.prompt }],
         metadata: { caronte_request_key: requestKey, caronte_output_contract: promptJson ? 'prompt_json_v1' : 'json_schema_v1' },
         ...(promptJson ? {} : { text: { format: { type: 'json_schema', name: request.schemaName, schema: request.schema, strict: true } } })
       } : {
         model, max_tokens: request.maxOutputTokens, system: request.system,
         messages: [{ role: 'user', content: request.prompt }],
-        output_config: { format: { type: 'json_schema', schema: request.schema } }
+        output_config: { format: { type: 'json_schema', schema: anthropicOutputSchema(request.schema) } }
       });
     } catch {
       throw error('provider_request_invalid', { provider, terminal: true });
     }
     const headers = provider === 'openai'
       ? { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
-      : { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' };
+      : anthropicRequestHeaders(key, anthropicWorkspaceId);
     const endpoint = provider === 'openai' ? 'https://api.openai.com/v1/responses' : 'https://api.anthropic.com/v1/messages';
     return unpack(await send(provider, 'POST', endpoint, headers, body), provider, model);
   }

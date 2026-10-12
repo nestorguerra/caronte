@@ -88,7 +88,7 @@ includes(readme, [
 ], 'Future book Sprint 9 README');
 
 includes(env, [
-  'FUTURE_BOOK_MAP_MODEL=gpt-5.4-pro'
+  'FUTURE_BOOK_MAP_MODEL=gpt-6.1-sol'
 ], 'Future book Sprint 9 env');
 
 includes(pkg, [

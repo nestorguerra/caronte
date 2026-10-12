@@ -8,7 +8,8 @@ const projectUrl='https://synthetic-caronte.supabase.co';
 const baseUrl=`${projectUrl}/functions/v1`;
 const monitorSecret='synthetic-monitor-secret-do-not-log';
 const configured={enabled:true,projectUrl,functionsBaseUrl:baseUrl,monitorSecret};
-const env={CARONTE_BOOK_RECOVERY_ENABLED:'true',SUPABASE_URL:projectUrl,FUNCTIONS_BASE_URL:baseUrl,FUTURE_BOOK_MONITOR_SECRET:monitorSecret};
+const workerSecret='synthetic-exclusive-book-worker-secret';
+const env={CARONTE_BOOK_RECOVERY_ENABLED:'true',SUPABASE_URL:projectUrl,FUNCTIONS_BASE_URL:baseUrl,CARONTE_BOOK_WORKER_SECRET:workerSecret};
 const privateDetail=`${monitorSecret} private interview https://private.test/?token=secret`;
 
 test('recovery is default-off and cannot contact a server without explicit opt-in',async()=>{
@@ -31,6 +32,22 @@ test('one recovery request uses the matching project endpoint and only the monit
   assert.equal(headers.get('authorization'),null);assert.equal(headers.get('apikey'),null);
   assert.equal(headers.get('content-type'),'application/json');
   assert.deepEqual(JSON.parse(options.body),{action:'advanceBook'});
+});
+test('the CLI uses only the dedicated book key and cannot read or fall back to a broad monitor key',async()=>{
+ const logs=[];let calls=0;
+ assert.equal(await runBookRecovery({env:{...env,get FUTURE_BOOK_MONITOR_SECRET(){assert.fail('Broad credential read');}},
+  write:v=>logs.push(v),fetchImpl:async(_url,options)=>{
+   calls++;const headers=new Headers(options.headers);
+   assert.equal(headers.get('x-caronte-book-worker-secret'),workerSecret);
+   assert.equal(headers.get('x-future-book-monitor-secret'),null);
+   assert.equal(headers.get('authorization'),null);
+   return Response.json({ok:true,accepted:true,jobId:null});
+  }}),0);
+ assert.equal(calls,1);assert.doesNotMatch(logs[0],/exclusive-book-worker-secret/);
+ const invalid=[];
+ assert.equal(await runBookRecovery({env:{...env,CARONTE_BOOK_WORKER_SECRET:'',FUTURE_BOOK_MONITOR_SECRET:monitorSecret},
+  write:v=>invalid.push(v),fetchImpl:()=>assert.fail('Invalid dedicated key')}),1);
+ assert.equal(JSON.parse(invalid[0]).errorCode,'book_recovery_configuration_invalid');
 });
 test('mismatched, insecure or credential-bearing targets fail before exposing the monitor secret',async()=>{
   const variants=[
@@ -125,6 +142,7 @@ test('the prepared operations workflow gates all invocations and does not deploy
   assert.match(yaml,/cancel-in-progress: false/);assert.match(yaml,/environment: caronte-book-operations/);
   assert.match(yaml,/persist-credentials: false/);assert.match(yaml,/timeout-minutes: 2/);
   assert.match(yaml,/contents: read/);assert.match(yaml,/node scripts\/wake-caronte-book-queue\.mjs/);
-  assert.match(yaml,/secrets\.FUTURE_BOOK_MONITOR_SECRET/);
+  assert.match(yaml,/secrets\.CARONTE_BOOK_WORKER_SECRET/);
+  assert.doesNotMatch(yaml,/FUTURE_BOOK_MONITOR_SECRET/);
   assert.doesNotMatch(yaml,/SUPABASE_SERVICE_ROLE_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|LULU_CLIENT_SECRET|pages: write|id-token: write|pull_request_target|continue-on-error|npm install|npm ci|deploy-pages|--retry/);
 });

@@ -1,6 +1,6 @@
 import { fingerprintArtifact } from './caronte-literary.mjs';
 
-export const BOOK_JOB_VERSION = 'caronte-longform-v1';
+export const BOOK_JOB_VERSION = 'caronte-longform-v2';
 
 function revisionOf(step) {
   const suffix = String(step.step_key || '').split(':').at(-1);
@@ -143,6 +143,7 @@ export async function runClaimedJob({ job, steps, checkpoint, finish, build, val
   steps = structuredClone(steps);
   const next = planNextStep(steps);
   const artifacts = collectArtifacts(steps, job.interview);
+  artifacts.contractVersion=job.model_config?.literaryContract?.version;
   const gate = async (code, receipt = null) => {
     await checkpoint({ ...(receipt || { step_key: 'editorial_gate', stage: 'gate' }), status: 'failed', error_code: code }, 'blocked');
     return { status: 'blocked', errorCode: code };
@@ -180,7 +181,7 @@ export async function runClaimedJob({ job, steps, checkpoint, finish, build, val
   let polled = false;
   let received = false;
   try {
-    const request = await build({ stage: next.stage, interview: job.interview, artifacts,
+    const request = await build({ stage: next.stage, interview: job.interview, artifacts,contractVersion:artifacts.contractVersion,
       unit: next.unit, draft: artifacts.drafts[next.unit?.id], review });
     const inputHash = await fingerprintStep(next, artifacts, request);
     if (previous?.input_hash && previous.input_hash !== inputHash) return gate('stale_step_input');
@@ -214,7 +215,7 @@ export async function runClaimedJob({ job, steps, checkpoint, finish, build, val
     }
     if (result.status !== 'completed') throw Object.assign(new Error(), { code: 'invalid_provider_status', terminal: true });
     const output = await validate(next.stage, result.parsed, {
-      interview: job.interview, artifacts, biography: artifacts.biography,
+      interview: job.interview, artifacts, contractVersion:artifacts.contractVersion,biography: artifacts.biography,
       world: artifacts.world, outline: artifacts.outline, plan: artifacts.outline,
       unit: next.unit, draft: artifacts.drafts[next.unit?.id], review
     });

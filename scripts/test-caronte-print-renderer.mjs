@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {PDFDocument} from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import {createPrintRenderer, prototypeCoverDimensions} from '../supabase/functions/_shared/caronte-print.mjs';
-import {printManuscript} from './fixtures/print-manuscript.mjs';
+import {printManuscript,printManuscriptThirty} from './fixtures/print-manuscript.mjs';
 import {loadPrintFonts} from '../supabase/functions/_shared/caronte-print-fonts.mjs';
 
 const fonts = Object.fromEntries(await Promise.all(['Regular', 'Bold', 'Italic'].map(async name =>
@@ -12,6 +12,20 @@ const fonts = Object.fromEntries(await Promise.all(['Regular', 'Bold', 'Italic']
 const renderer = createPrintRenderer({PDFDocument, fontkit, fonts});
 const source = printManuscript();
 const proofPromise = renderer(source, {proof: true});
+
+test('the +30 contract produces 216–224 real pages with the complete text and an independent cover',async()=>{
+  const current=printManuscriptThirty();
+  const proof=await renderer(current,{proof:true});
+  const pdf=await PDFDocument.load(proof.interior.bytes);
+  assert.ok(pdf.getPageCount()>=216&&pdf.getPageCount()<=224);
+  assert.equal(proof.interior.pageCount,pdf.getPageCount());
+  assert.equal((await PDFDocument.load(proof.cover.bytes)).getPageCount(),1);
+  const actual=proof.layout.pages.flatMap(page=>page.lines.filter(line=>line.kind==='body').map(line=>line.text)).join(' ');
+  assert.equal(actual,current.sections.flatMap(chapter=>chapter.paragraphs).join(' ').replace(/\s+/g,' '));
+  assert.equal(proof.ready_for_print,false);
+  assert.ok(proof.layout.size>=12);assert.equal(current.future_age-current.current_age,30);
+  assert.ok(actual.includes('FIN5P30'));
+});
 
 test('actual embedded-font interior has 180-200 pages and a separate full-spread cover', async () => {
   const proof = await proofPromise;

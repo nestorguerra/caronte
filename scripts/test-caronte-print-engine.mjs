@@ -9,7 +9,7 @@ import {createPrintStages,prototypeCoverDimensions} from '../supabase/functions/
 import {loadPrintFonts} from '../supabase/functions/_shared/caronte-print-fonts.mjs';
 import {createPrintEngine} from '../supabase/functions/_shared/caronte-print-engine.mjs';
 import {createPrintStageArchive} from '../supabase/functions/_shared/caronte-print-storage.mjs';
-import {printManuscript} from './fixtures/print-manuscript.mjs';
+import {printManuscript,printManuscriptThirty} from './fixtures/print-manuscript.mjs';
 
 const sid='11111111-1111-4111-8111-111111111111',mid='33333333-3333-4333-8333-333333333333';
 const jid='22222222-2222-4222-8222-222222222222',pid='44444444-4444-4444-8444-444444444444';
@@ -71,7 +71,7 @@ export function printDatabase(){
   losePartCompletion:()=>{loseComplete=true;},loseFinishAcceptance:()=>{loseFinish=true;},
   rejectCheckpointReceipt:()=>{rejectCheckpointReceipt=true;},alterIntentRead:()=>{alterIntentRead=true;}};
 }
-function fixture(){
+function fixture({pages=194}={}){
  const db=printDatabase(),objects=new Map(),requests=[];let renders=0,unavailable=false;
  const bytes=new TextEncoder().encode('%PDF-1.7\nsynthetic coordinator boundary');
  const archive=createPrintStageArchive({url:'https://storage.test',serviceKey:'synthetic-key',fetch:async(url,init)=>{
@@ -86,10 +86,10 @@ function fixture(){
  const stages={
   planChapter:async(source,index,{size})=>({chapterIndex:index,size,sourceFingerprint:sha(source)}),
   composeLayout:async(source,plans,{createdAt})=>({sourceFingerprint:sha(source),createdAt,wordCount:48300,proof:false,
-   layoutHash:'b'.repeat(64),manifestHash:'c'.repeat(64),layout:{pages:Array(194).fill({}),paragraphCount:150,size:13,leading:18.2,margins:{},chapterStarts:[]}}),
+   layoutHash:'b'.repeat(64),manifestHash:'c'.repeat(64),layout:{pages:Array(pages).fill({}),paragraphCount:150,size:13,leading:18.2,margins:{},chapterStarts:[]}}),
   renderInteriorPart:async(source,manifest,{firstPage,lastPage})=>{renders++;return{bytes,byteSize:bytes.length,sha256:sha(bytes),
    sourceFingerprint:sha(source),firstPage,lastPage,pageCount:lastPage-firstPage+1};},
-  mergeInterior:async(source,manifest,parts)=>({bytes,byteSize:bytes.length,sha256:sha(bytes),pageCount:194,paragraphCount:150,
+  mergeInterior:async(source,manifest,parts)=>({bytes,byteSize:bytes.length,sha256:sha(bytes),pageCount:pages,paragraphCount:150,
    sourceFingerprint:sha(source),width:419.76,height:595.44,template:'caronte-a5-embedded-v2'}),
   renderCover:async(source,manifest,interior,options)=>({bytes,byteSize:bytes.length,sha256:sha(bytes),pageCount:1,
    sourceFingerprint:sha(source),dimensions:await options.coverDimensions(interior.pageCount)})
@@ -104,6 +104,17 @@ test('enqueue reserves one stable job/PDF/version and hides the manuscript from 
  assert.equal(first.job.id,again.job.id);assert.equal(app.db.job.version,1);assert.equal(app.db.job.pdf_id,pid);
  assert.equal(app.db.job.source_snapshot.sections[4].paragraphs[29],printManuscript().sections[4].paragraphs[29]);
  assert.equal(JSON.stringify(first).includes('INICIO1P1'),false);assert.equal(first.pdf,null);
+});
+test('a new +30 job finishes 220-page parts and binds the version on its PDF without changing old jobs',async()=>{
+  const app=fixture({pages:220}),row={...manuscript(),manuscript:printManuscriptThirty()};
+  await app.engine().enqueue(sid,row);
+  for(let n=0;n<140&&app.db.job.status!=='ready';n++){
+    const result=await app.engine().advance();assert.notEqual(result.status,'blocked',result.errorCode);
+  }
+  assert.equal(app.db.job.status,'ready');assert.equal(app.db.pdfs[0].page_count,220);
+  assert.equal(app.db.pdfs[0].metadata.literary_contract_version,'caronte-literary-v3');
+  assert.ok(app.db.steps.some(step=>step.step_key==='part:211:220'));
+  assert.equal(app.db.pdfs[0].print_validation.ready_for_print,false);
 });
 test('changed source, degraded manuscript or absent editorial gate cannot start another active print',async()=>{
  const app=fixture();await app.engine().enqueue(sid,manuscript());
@@ -190,7 +201,7 @@ test('unconfirmed intent acceptance or mismatched readback cannot authorize any 
   assert.equal(app.objects.size,0);assert.equal(app.requests.filter(r=>r.method==='POST').length,0);
  }
 });
-test('real staged PDFs survive a worker instance replacement through the coordinator and retain the complete frozen layout',async()=>{
+for(const modern of [false,true])test(`real ${modern?'+30 / 216-224':'legacy +40 / 180-200'} staged PDFs survive a worker replacement and retain the complete frozen layout`,async()=>{
  const db=printDatabase(),objects=new Map();let uploads=0;
  const archive=createPrintStageArchive({url:'https://storage.test',serviceKey:'synthetic-key',fetch:async(url,init)=>{
   if(init.method==='POST'){
@@ -199,7 +210,7 @@ test('real staged PDFs survive a worker instance replacement through the coordin
   }
   return objects.has(url)?new Response(objects.get(url)):new Response('',{status:404});
  }});
- const fonts=await loadPrintFonts(readFile),row=manuscript();let seed=20261012;
+ const fonts=await loadPrintFonts(readFile),row=modern?{...manuscript(),manuscript:printManuscriptThirty()}:manuscript();let seed=20261012;
  for(const chapter of row.manuscript.sections)for(let p=0;p<chapter.paragraphs.length;p++){
   const words=chapter.paragraphs[p].split(' ');
   for(let i=words.length-1;i>0;i--){seed=(Math.imul(seed,1664525)+1013904223)>>>0;
@@ -211,17 +222,25 @@ test('real staged PDFs survive a worker instance replacement through the coordin
    ...prototypeCoverDimensions(count),source:'lulu-api',environment:job.lulu_environment,
    podPackageId:job.pod_package_id,pageCount:count})});
  await engine().enqueue(sid,row);
- for(let i=0;i<26;i++)await engine().advance();
+ for(let i=0;i<(modern?106:26);i++)await engine().advance();
  db.losePartCompletion();await assert.rejects(engine().advance(),/print_storage_unavailable/);
  assert.equal(uploads,1);db.tick(141);await engine().advance();assert.equal(uploads,1);
- for(let i=0;i<22;i++)await engine().advance();
- assert.equal(db.job.status,'ready');assert.equal(db.pdfs.length,1);assert.equal(uploads,22);
+ for(let i=0;i<26&&db.job.status!=='ready';i++){
+  const result=await engine().advance();assert.notEqual(result.status,'blocked',result.errorCode);
+ }
+ assert.equal(db.job.status,'ready');assert.equal(db.pdfs.length,1);
  const pdf=db.pdfs[0],manifest=db.steps.find(s=>s.step_key==='compose').output;
  const interior=objects.get(`https://storage.test/storage/v1/object/future-book-pdfs/${pdf.storage_path}`);
  const cover=objects.get(`https://storage.test/storage/v1/object/future-book-pdfs/${pdf.lulu_metadata.cover_pdf_storage_path}`);
- assert.equal((await PDFDocument.load(interior)).getPageCount(),194);
+ const pageCount=(await PDFDocument.load(interior)).getPageCount();
+ if(modern){
+  assert.ok(pageCount>=216&&pageCount<=224,pageCount);
+  assert.equal(pdf.metadata.literary_contract_version,'caronte-literary-v3');
+  assert.equal(db.steps.filter(step=>step.stage==='plan').length,105);
+ }else assert.equal(pageCount,194);
+ assert.equal(uploads,Math.ceil(pageCount/10)+2);
  assert.equal((await PDFDocument.load(cover)).getPageCount(),1);
- assert.equal(sha(JSON.stringify(manifest.layout)),'7f3e02233706bf3f1d67b8232c22d8f2bd8ec77ba60f190ab347bb4ab57c391c');
+ if(!modern)assert.equal(sha(JSON.stringify(manifest.layout)),'7f3e02233706bf3f1d67b8232c22d8f2bd8ec77ba60f190ab347bb4ab57c391c');
  assert.equal(manifest.layout.pages.flatMap(p=>p.lines.filter(l=>l.kind==='body').map(l=>l.text)).join(' '),
   row.manuscript.sections.flatMap(c=>c.paragraphs).join(' '));
  assert.equal(pdf.print_validation.ready_for_print,false);
@@ -233,13 +252,13 @@ test('real staged PDFs survive a worker instance replacement through the coordin
  if(folder){
   assert.ok(isAbsolute(folder));await mkdir(folder,{recursive:true});
   const sourceBytes=JSON.stringify(row.manuscript);
-  const report={pageCount:194,wordCount:48300,paragraphCount:150,sourceSha256:sha(sourceBytes),
+  const report={pageCount,wordCount:row.manuscript.word_count,paragraphCount:150,sourceSha256:sha(sourceBytes),
    interiorSha256:sha(interior),coverSha256:sha(cover),size:manifest.layout.size,leading:manifest.layout.leading,
    margins:manifest.layout.margins,chapterStarts:manifest.layout.chapterStarts,
    coverDimensions:pdf.lulu_metadata.cover_dimensions,proof:false,fixtureOnly:true,ready_for_print:false};
   for(const [name,data] of [['fuente.json',sourceBytes],['informe.json',JSON.stringify(report)],
    ['interior.pdf',interior],['cubierta.pdf',cover]]){
-   await writeFile(join(folder,`caronte-prueba-tecnica-${name}`),data,{flag:'wx'});
+   await writeFile(join(folder,`caronte-prueba-tecnica-${modern?'30-':''}${name}`),data,{flag:'wx',mode:0o600});
   }
  }
 });

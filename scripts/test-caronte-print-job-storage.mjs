@@ -51,6 +51,14 @@ test('scope, source hash and receipt path reject before any network request',asy
  await assert.rejects(app.archive.read(job,'interior',{...file,path:'another/job/interior.pdf'}),/print_archive_scope/);
  assert.equal(app.calls.length,0);
 });
+test('only a versioned +30 job can archive the final 220-page parts beyond the old 200-page limit',async()=>{
+  const app=fixture(),current={...job,source_snapshot:{prompt_version:'caronte-literary-v3'}};
+  const saved=await app.archive.write(current,'part:211:220',file);
+  assert.ok(saved.path.endsWith('/parts/211-220.pdf'));
+  await app.archive.write(current,'part:221:224',file);
+  await assert.rejects(app.archive.write(job,'part:211:220',file),/print_archive_scope/);
+  await assert.rejects(app.archive.write(current,'part:221:226',file),/print_archive_scope/);
+});
 test('full response bodies have a deadline and are canceled',async()=>{
  let canceled=false;
  const archive=storage.createPrintStageArchive({url:'https://storage.test',serviceKey:'synthetic-key',timeoutMs:15,

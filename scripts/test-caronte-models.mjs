@@ -114,6 +114,68 @@ test('Anthropic uses current structured-output contract and full context', async
   assert.deepEqual(result.parsed, { prose: 'An independent review.' });
 });
 
+test('Anthropic workspace-scoped access is forwarded only to Anthropic', async () => {
+  const adapter = client(async (url, init) => {
+    if (url.startsWith('https://api.anthropic.com/')) {
+      assert.equal(init.headers['anthropic-workspace-id'], 'wrkspc_CaronteTest123');
+      return jsonResponse(anthropicResponse({ model: 'claude-opus-5-5' }));
+    }
+    assert.equal(init.headers['anthropic-workspace-id'], undefined);
+    return jsonResponse(openaiResponse({ model: 'gpt-6.1-sol' }));
+  }, { anthropicWorkspaceId: 'wrkspc_CaronteTest123', writerModel: 'gpt-6.1-sol', reviewerModel: 'claude-opus-5-5' });
+  assert.equal((await adapter.start(request, { ...options, provider: 'anthropic' })).model, 'claude-opus-5-5');
+  assert.equal((await adapter.start(request, options)).model, 'gpt-6.1-sol');
+});
+
+test('invalid workspace identifiers stop before sending any provider request', async () => {
+  for (const anthropicWorkspaceId of ['wrong_workspace', 'wrkspc_valid\r\nx-extra: secret']) {
+    let calls = 0;
+    assert.throws(() => client(async () => { calls++; }, { anthropicWorkspaceId }), failure('provider_config_invalid', { terminal: true }));
+    assert.equal(calls, 0);
+  }
+});
+
+test('Claude receives a compatible schema while the original literary limits remain intact', async () => {
+  const constrained = { ...request, schema: { type: 'object', additionalProperties: false, required: ['prose', 'score'], properties: {
+    prose: { type: 'string', minLength: 1, maxLength: 2000, description: 'Literary prose' },
+    score: { type: 'integer', minimum: 0, maximum: 5 }
+  } } };
+  const original = structuredClone(constrained.schema);
+  const adapter = client(async (_url, init) => {
+    const schema = JSON.parse(init.body).output_config.format.schema;
+    assert.equal(schema.properties.prose.minLength, undefined);
+    assert.equal(schema.properties.prose.maxLength, undefined);
+    assert.equal(schema.properties.score.minimum, undefined);
+    assert.equal(schema.properties.score.maximum, undefined);
+    assert.match(schema.properties.prose.description, /minLength.*1/);
+    assert.match(schema.properties.score.description, /maximum.*5/);
+    assert.deepEqual(schema.required, original.required);
+    assert.equal(schema.additionalProperties, false);
+    return jsonResponse(anthropicResponse());
+  });
+  await adapter.start(constrained, { ...options, provider: 'anthropic' });
+  assert.deepEqual(constrained.schema, original);
+  const scores = Object.fromEntries(['grounding', 'voice', 'depth', 'futureTexture', 'coherence', 'originality'].map(name => [name, 6]));
+  assert.throws(() => validateArtifact('review', { unitId: 'unit_01', verdict: 'pass', scores, issues: [], coveredUnitIds: [] }), /invalid_artifact/);
+});
+
+test('GPT-6.1 Sol receives the explicitly configured very-high reasoning effort', async () => {
+  const adapter = client(async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.equal(body.model, 'gpt-6.1-sol');
+    assert.deepEqual(body.reasoning, { effort: 'xhigh' });
+    assert.equal(body.text.format.type, 'json_schema');
+    return jsonResponse(openaiResponse({ model: 'gpt-6.1-sol', status: 'queued', output: [] }));
+  }, { writerModel: 'gpt-6.1-sol', writerReasoningEffort: 'xhigh' });
+  assert.equal((await adapter.start(request, options)).status, 'pending');
+});
+
+test('unsupported reasoning settings are rejected without a paid request', () => {
+  for (const writerReasoningEffort of ['ultra', 'none', 'HIGH']) {
+    assert.throws(() => client(async () => assert.fail('No request allowed'), { writerReasoningEffort }), failure('provider_config_invalid', { terminal: true }));
+  }
+});
+
 test('Anthropic end_turn is required; refusal and token exhaustion are terminal, not success', async () => {
   for (const [stop_reason, code] of [['refusal', 'provider_refusal'], ['max_tokens', 'provider_output_incomplete'], ['pause_turn', 'provider_output_incomplete'], ['stop_sequence', 'provider_output_incomplete']]) {
     await assert.rejects(client(async () => jsonResponse(anthropicResponse({ stop_reason }))).start(request, { ...options, provider: 'anthropic' }), failure(code, { terminal: true, uncertain: false, id: 'msg_test123', providerStatus: stop_reason }));
@@ -252,7 +314,7 @@ test('prompt-JSON output still passes the real literary gate before the worker a
       return jsonResponse(openaiResponse({ model: 'gpt-5.4-pro', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(output) }] }] }));
     }, { writerModel: 'gpt-5.4-pro' });
     const result = await runClaimedJob({
-      job: { id: 'fixture', interview, model_config: { writerModel: 'gpt-5.4-pro', reviewerModel: 'reviewer-model' } },
+      job: { id: 'fixture', interview, model_config: { writerModel: 'gpt-5.4-pro', reviewerModel: 'reviewer-model',literaryContract:{version:'caronte-literary-v2'} } },
       steps: [], provider, build: buildStageRequest, validate: validateArtifact,
       checkpoint: async (step, state) => receipts.push({ step, state }),
       assemble: async () => assert.fail('A single biography must never become a book'),

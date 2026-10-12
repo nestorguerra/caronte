@@ -12,7 +12,7 @@ import {LULU_A5_PAPERBACK_SKU} from '../supabase/functions/_shared/lulu-print.mj
 const code=stripTypeScriptTypes(readFileSync('supabase/functions/future-book-session/index.ts','utf8').replace(/^import .*;\n/gm,''),{mode:'strip'});
 const serviceCode=stripTypeScriptTypes(readFileSync('supabase/functions/_shared/service.ts','utf8').replace(/^export /gm,''),{mode:'strip'});
 const id='948bc512-eaf8-4f2c-8ae8-c302561ca8d4',session='6159e0f9-4aef-4f93-9d76-f46bfa51a18a';
-function fixture({role='editor',missingReadback=false,luluConfigured=true,authFailure=false,quoteReadbackFailure=false,ordersEnabled=true,storedLulu=false}={}) {
+function fixture({role='editor',missingReadback=false,luluConfigured=true,authFailure=false,quoteReadbackFailure=false,ordersEnabled=true,storedLulu=false,databaseTimestampOffsetMs}={}) {
   const hash=x=>x.repeat(64),path=kind=>`${session}/v01/${id}/${kind}.pdf`;
   let row={id,session_id:session,manuscript_id:'manuscript',version:1,page_count:194,updated_at:'revision-1',
     review_status:'pending_review',storage_path:path('interior'),quality_report:{byte_size:100,cover_byte_size:80},
@@ -38,7 +38,11 @@ function fixture({role='editor',missingReadback=false,luluConfigured=true,authFa
     if(options.method==='PATCH'){
       const condition=new URLSearchParams(resource.split('?')[1]).get('updated_at');
       if(condition&&condition!==`eq.${row.updated_at}`)return [];
-      row={...row,...structuredClone(options.body),updated_at:`revision-${++revision}`};return [structuredClone(row)];
+      row={...row,...structuredClone(options.body),updated_at:`revision-${++revision}`};
+      if(databaseTimestampOffsetMs!==undefined)for(const field of ['reviewed_at','released_at']){
+        if(options.body[field])row[field]=new Date(Date.parse(options.body[field])+databaseTimestampOffsetMs).toISOString().replace(/Z$/,'+00:00');
+      }
+      return [structuredClone(row)];
     }
     if(missingReadback&&revision>1||quoteReadbackFailure&&row.metadata?.print_quote)return [];
     const select=new URLSearchParams(resource.split('?')[1]).get('select');
@@ -110,6 +114,26 @@ test('server approval is hash-bound and preflight uses conditional writes with d
   assert.equal(app.row().print_validation.ready_for_print,false);
   assert.equal(app.row().lulu_metadata.ready_for_print,false);
   assert.equal(app.row().print_validation.editorial_approval,null);
+});
+test('PDF approval accepts the same database timestamp in PostgreSQL offset notation',async()=>{
+  const app=fixture({databaseTimestampOffsetMs:0});
+  await app.approve();
+  assert.equal(app.row().review_status,'approved');
+  assert.match(app.row().reviewed_at,/\+00:00$/);
+  assert.equal(Date.parse(app.row().reviewed_at),Date.parse(app.row().print_validation.editorial_approval.at));
+});
+test('a one-millisecond difference in PDF approval readback still blocks provider dispatch',async()=>{
+  const app=fixture({databaseTimestampOffsetMs:1});
+  await assert.rejects(app.approve(),/print_review_persistence_unverified/);
+  assert.equal(app.sideEffects.length,0);
+});
+test('timestamp comparison retains microsecond differences and never normalizes JSON approval bindings',()=>{
+  const app=fixture();
+  const matches=app.context.printStoredFieldMatches;
+  assert.equal(matches('reviewed_at','2026-10-12 12:32:05.143000+02','2026-10-12T10:32:05.143Z'),true);
+  assert.equal(matches('reviewed_at','2026-10-12 10:32:05.143001+00','2026-10-12T10:32:05.143Z'),false);
+  assert.equal(matches('reviewed_at','invalid','invalid'),false);
+  assert.equal(matches('print_validation',{at:'2026-10-12T10:32:05.143+00:00'},{at:'2026-10-12T10:32:05.143Z'}),false);
 });
 const oauthInput={environment:'sandbox',clientKey:'synthetic-stored-oauth-client',clientSecret:'synthetic-stored-oauth-secret',
   configurationId:'36bb9d23-c851-47d4-aef3-0883b1fc85cc',expectedRevision:null,saveConsent:true};

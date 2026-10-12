@@ -60,6 +60,17 @@ test('four bounded operations persist same-ID receipts and only both normalized 
   assert.ok(app.writes.slice(0,-1).every(item=>!item.print_validation.ready_for_print));
   await app.service.run(artifact);assert.equal(app.calls.filter(call=>call[0]==='post').length,2);
 });
+test('only an explicitly versioned +30 PDF can validate a 220-page interior',async()=>{
+  const current=row();current.page_count=220;current.metadata.literary_contract_version='caronte-literary-v3';
+  current.lulu_metadata.cover_dimensions.pageCount=220;
+  const app=fixture({row:current,interiorGet:{id:7,status:'NORMALIZED',errors:[],page_count:'220',valid_pod_package_ids:[sku],
+    source_url:'https://storage.test/interior.pdf?token=private'}});
+  for(let i=0;i<4;i++)await app.service.run(artifact);
+  assert.equal(app.record().print_validation.ready_for_print,true);
+  assert.equal(app.record().print_validation.preflight.binding.literary_contract_version,'caronte-literary-v3');
+  delete current.metadata.literary_contract_version;
+  await assert.rejects(fixture({row:current}).service.run(artifact),/preflight_artifact_not_approved/);
+});
 test('basic interior validation never substitutes for full normalization',async()=>{
   const app=fixture({interiorGet:{id:7,status:'VALIDATED',source_url:'https://storage.test/interior.pdf?token=private',errors:[],page_count:194,valid_pod_package_ids:[sku]}});
   await app.service.run(artifact);await app.service.run(artifact);await app.service.run(artifact);
@@ -133,6 +144,93 @@ test('failed provider reads preserve the known receipt for later same-ID polling
   assert.equal(app.record().print_validation.preflight.interior.state,'pending');
   const resumed=fixture({row:app.record()});await resumed.service.run(artifact);
   assert.deepEqual(resumed.calls.filter(call=>['post','get'].includes(call[0])),[['get','interior',7]]);
+});
+for(const [label,errors] of [['null',null],['missing',undefined]]) {
+  test(`a NORMALIZING creation receipt with ${label} errors retains the ID for a same-ID GET`,async()=>{
+    const pending={id:7,status:'NORMALIZING',source_url:'https://storage.test/interior.pdf?token=private'};
+    if(errors!==undefined)pending.errors=errors;
+    const app=fixture({interiorPost:pending});
+    await app.service.run(artifact);
+    const interior=app.record().print_validation.preflight.interior;
+    assert.equal(interior.state,'pending');
+    assert.equal(interior.validation_id,7);
+    assert.equal(interior.provider_status,'NORMALIZING');
+    assert.equal(app.record().print_validation.ready_for_print,false);
+    assert.doesNotMatch(JSON.stringify(app.writes),/token=private/);
+    await app.service.run(artifact);
+    assert.equal(app.record().print_validation.preflight.interior.state,'normalized');
+    assert.deepEqual(app.calls.filter(call=>['post','get'].includes(call[0])),[['post','interior'],['get','interior',7]]);
+  });
+  test(`a NORMALIZED creation receipt with ${label} errors cannot normalize until a same-ID GET supplies an explicit empty array`,async()=>{
+    const incomplete={id:7,status:'NORMALIZED',source_url:'https://storage.test/interior.pdf?token=private',
+      page_count:'194',valid_pod_package_ids:[sku]};
+    if(errors!==undefined)incomplete.errors=errors;
+    const app=fixture({interiorPost:incomplete});
+    await app.service.run(artifact);
+    assert.equal(app.record().print_validation.preflight.interior.state,'pending');
+    assert.equal(app.record().print_validation.preflight.interior.validation_id,7);
+    assert.equal(app.record().print_validation.ready_for_print,false);
+    assert.deepEqual(app.calls.filter(call=>['post','get'].includes(call[0])),[['post','interior']]);
+    for(let index=0;index<3;index++)await app.service.run(artifact);
+    assert.equal(app.record().print_validation.preflight.status,'ready');
+    assert.equal(app.record().print_validation.ready_for_print,true);
+    assert.equal(app.record().lulu_metadata.send_to_lulu,false);
+    assert.deepEqual(app.calls.filter(call=>['post','get'].includes(call[0])),[['post','interior'],['get','interior',7],['post','cover'],['get','cover',9]]);
+  });
+  test(`a NORMALIZED GET with ${label} errors preserves the receipt and requires a later explicit empty array`,async()=>{
+    const incomplete={id:7,status:'NORMALIZED',source_url:'https://storage.test/interior.pdf?token=private',
+      page_count:'194',valid_pod_package_ids:[sku]};
+    if(errors!==undefined)incomplete.errors=errors;
+    const app=fixture({interiorGet:incomplete});
+    await app.service.run(artifact);await app.service.run(artifact);
+    assert.equal(app.record().print_validation.preflight.interior.state,'pending');
+    assert.equal(app.record().print_validation.preflight.interior.validation_id,7);
+    assert.equal(app.record().print_validation.ready_for_print,false);
+    const resumed=fixture({row:app.record()});
+    await resumed.service.run(artifact);
+    assert.equal(resumed.record().print_validation.preflight.interior.state,'normalized');
+    assert.deepEqual(resumed.calls.filter(call=>['post','get'].includes(call[0])),[['get','interior',7]]);
+  });
+}
+test('an unknown creation status retains the validated receipt identity but remains uncertain without replaying',async()=>{
+  const app=fixture({interiorPost:{id:7,status:'NEW_PROVIDER_STATUS',
+    source_url:'https://storage.test/interior.pdf?token=private',errors:[]}});
+  await app.service.run(artifact);
+  const interior=app.record().print_validation.preflight.interior;
+  assert.equal(interior.validation_id,7);
+  assert.equal(interior.state,'uncertain');
+  assert.equal(app.record().print_validation.ready_for_print,false);
+  const count=app.calls.length;
+  await app.service.run(artifact);
+  assert.equal(app.calls.length,count);
+  assert.deepEqual(app.calls.filter(call=>['post','get'].includes(call[0])),[['post','interior']]);
+  assert.doesNotMatch(JSON.stringify(app.writes),/token=private/);
+});
+test('a malformed errors object never normalizes either file or authorizes printing',async()=>{
+  const app=fixture({interiorPost:{id:7,status:'NORMALIZED',
+    source_url:'https://storage.test/interior.pdf?token=private',errors:{message:'private source_url echo'},
+    page_count:'194',valid_pod_package_ids:[sku]}});
+  await app.service.run(artifact);
+  assert.equal(app.record().print_validation.preflight.interior.validation_id,7);
+  assert.equal(app.record().print_validation.preflight.interior.state,'uncertain');
+  assert.equal(app.record().print_validation.ready_for_print,false);
+  assert.equal(app.record().lulu_metadata.ready_for_print,false);
+  await app.service.run(artifact);
+  assert.deepEqual(app.calls.filter(call=>['post','get'].includes(call[0])),[['post','interior']]);
+  assert.doesNotMatch(JSON.stringify(app.writes),/private source_url echo|token=private/);
+});
+test('invalid creation IDs or mismatched sources cannot become trusted receipts even when optional errors are null',async()=>{
+  for(const patch of [{id:0},{id:-1},{id:1.5},{id:'7'},{id:Number.MAX_SAFE_INTEGER+1},
+    {source_url:'https://storage.test/other.pdf?token=private'},{source_url:null}]) {
+    const app=fixture({interiorPost:{id:7,status:'NORMALIZING',
+      source_url:'https://storage.test/interior.pdf?token=private',errors:null,...patch}});
+    await app.service.run(artifact);await app.service.run(artifact);
+    assert.equal(app.record().print_validation.preflight.interior.validation_id,undefined);
+    assert.equal(app.record().print_validation.preflight.interior.state,'uncertain');
+    assert.equal(app.record().print_validation.ready_for_print,false);
+    assert.deepEqual(app.calls.filter(call=>['post','get'].includes(call[0])),[['post','interior']]);
+    assert.doesNotMatch(JSON.stringify(app.writes),/token=private/);
+  }
 });
 test('revoking human approval revokes readiness without any file/provider effect',async()=>{
   const app=fixture();for(let i=0;i<4;i++)await app.service.run(artifact);

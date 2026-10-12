@@ -1,4 +1,4 @@
-import { normalizeInterview, fingerprintArtifact, buildStageRequest, validateArtifact, assembleManuscript } from './caronte-literary.mjs';
+import { normalizeInterview, fingerprintArtifact, buildStageRequest, validateArtifact, assembleManuscript, LITERARY_CONTRACT, resolveLiteraryContract } from './caronte-literary.mjs';
 import { BOOK_JOB_VERSION, publicBookJob, runClaimedJob } from './caronte-jobs.mjs';
 import { createBookModelClient } from './caronte-models.mjs';
 
@@ -49,10 +49,12 @@ export function createBookEngine({ rest, settings, wake = () => {}, fetchImpl = 
     if (['writerModel', 'reviewerModel', 'openaiKey', 'anthropicKey'].some(key => typeof config[key] !== 'string' || !config[key].trim())) {
       fail('book_provider_configuration_required');
     }
+    createBookModelClient({ ...config, fetchImpl });
     const job = first(await rpc('caronte_enqueue_book', {
       p_session_id: session.id, p_interview_hash: interviewHash, p_interview: interview,
       p_prompt_version: BOOK_JOB_VERSION,
-      p_model_config: { writerModel: config.writerModel, reviewerModel: config.reviewerModel }
+      p_model_config: { writerModel: config.writerModel, reviewerModel: config.reviewerModel,literaryContract:resolveLiteraryContract(),
+        ...(config.writerReasoningEffort ? { writerReasoningEffort: config.writerReasoningEffort } : {}) }
     }));
     if (!job?.id) fail('book_enqueue_failed');
     if (['queued', 'running'].includes(job.status)) wake(job.id);
@@ -61,10 +63,22 @@ export function createBookEngine({ rest, settings, wake = () => {}, fetchImpl = 
   async function advance(jobId = null) {
     const job = first(await rpc('caronte_claim_book_job', { p_job_id: jobId }));
     if (!job?.id) return { status: 'idle' };
+    let supported=false;
+    try{
+      const snapshot=job.model_config?.literaryContract;
+      supported=job.prompt_version===BOOK_JOB_VERSION&&snapshot?.version===LITERARY_CONTRACT.version&&
+        await fingerprintArtifact(snapshot)===await fingerprintArtifact(resolveLiteraryContract(snapshot.version));
+    }catch{supported=false;}
+    if(!supported){
+      await rpc('caronte_checkpoint_book_job',{p_job_id:job.id,p_lease_token:job.lease_token,
+        p_step:{step_key:'contract_gate',stage:'gate',status:'failed',error_code:'book_contract_unsupported'},p_state:'blocked',p_delay_seconds:0});
+      return{status:'blocked',jobId:job.id,errorCode:'book_contract_unsupported'};
+    }
     const steps = await jobSteps(job.id);
     const keys = await settings();
     const provider = createBookModelClient({
-      ...keys, ...job.model_config, fetchImpl, timeoutMs: 110000
+      ...keys, ...job.model_config, writerReasoningEffort: job.model_config.writerReasoningEffort,
+      fetchImpl, timeoutMs: 110000
     });
     const result = await runClaimedJob({ job, steps, provider,
       build: buildStageRequest, validate: validateArtifact, assemble: assembleManuscript,

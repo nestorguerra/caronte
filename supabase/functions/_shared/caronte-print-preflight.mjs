@@ -1,4 +1,5 @@
 import {LULU_A5_PAPERBACK_SKU, LULU_VALIDATION_STATUSES} from './lulu-print.mjs';
+import {resolveLiteraryContract} from './caronte-literary.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const hex=/^[0-9a-f]{64}$/;
@@ -12,10 +13,11 @@ const fail=code=>{throw new Error(code);};
 /** The human approval is tied to the exact immutable files, not just a PDF row ID. */
 export function printArtifactBinding(row,environment) {
   const v=row?.print_validation,l=row?.lulu_metadata,m=row?.metadata,a=v?.editorial_approval;
+  const contract=resolveLiteraryContract(m?.literary_contract_version??'caronte-literary-v2');
   const path=kind=>`${row?.session_id}/v${String(row?.version).padStart(2,'0')}/${m?.artifact_id}/${kind}.pdf`;
   if(!uuid.test(row?.id)||!uuid.test(row?.session_id)||!uuid.test(m?.artifact_id)||
       !Number.isSafeInteger(row.version)||row.version<1||!row.manuscript_id||
-      !Number.isSafeInteger(row.page_count)||row.page_count<180||row.page_count>200||
+      !Number.isSafeInteger(row.page_count)||row.page_count<contract.physicalPages.min||row.page_count>contract.physicalPages.max||
       !['approved','released_to_customer'].includes(row.review_status)||
       m.template!=='caronte-a5-embedded-v2'||v?.template!==m.template||m.storage_verified!==true||
       v.fonts_embedded!==true||v.separate_cover!==true||
@@ -34,7 +36,8 @@ export function printArtifactBinding(row,environment) {
     source_sha256:v.source_sha256,interior_sha256:v.interior_sha256,cover_sha256:v.cover_sha256,
     interior_path:row.storage_path,cover_path:l.cover_pdf_storage_path,
     interior_byte_size:row.quality_report.byte_size,cover_byte_size:row.quality_report.cover_byte_size,
-    page_count:row.page_count,pod_package_id:l.pod_package_id,environment,approval:a};
+    page_count:row.page_count,pod_package_id:l.pod_package_id,environment,approval:a,
+    ...(contract.version==='caronte-literary-v3'?{literary_contract_version:contract.version}:{})};
 }
 
 /** One provider operation per invocation. Stored submission intents are never replayed. */
@@ -59,11 +62,17 @@ export function createPrintPreflight({environment,read,compareAndSet,verifyFile,
   }
   async function receipt(kind,data,intent,binding,creation) {
     if(!Number.isSafeInteger(data?.id)||data.id<1||(!creation&&data.id!==intent.validation_id)||
-        !LULU_VALIDATION_STATUSES[kind].includes(data.status)||typeof data.source_url!=='string'||
-        await sha(data.source_url)!==intent.source_url_sha256||!Array.isArray(data.errors)) {
+        typeof data.source_url!=='string'||
+        await sha(data.source_url)!==intent.source_url_sha256) {
       return {...intent,state:creation?'uncertain':'failed',error_code:'validation_receipt_invalid',checked_at:stamp()};
     }
-    const base={...intent,validation_id:data.id,provider_status:data.status,checked_at:stamp()};
+    const base={...intent,validation_id:data.id,checked_at:stamp()};
+    if(!LULU_VALIDATION_STATUSES[kind].includes(data.status)||
+      (data.errors!==undefined&&data.errors!==null&&!Array.isArray(data.errors)))return{
+        ...base,state:creation?'uncertain':'failed',error_code:'validation_receipt_invalid'};
+    base.provider_status=data.status;
+    if(data.errors===undefined||data.errors===null)return{
+      ...base,state:data.status==='ERROR'?'failed':'pending',error_code:data.status==='ERROR'?'lulu_validation_failed':'validation_errors_pending'};
     if(data.status==='ERROR'||data.errors.length)return {...base,state:'failed',error_code:'lulu_validation_failed'};
     if(data.status!=='NORMALIZED')return {...base,state:'pending'};
     if(kind==='interior'&&(!/^[0-9]+$/.test(String(data.page_count))||Number(data.page_count)!==binding.page_count||

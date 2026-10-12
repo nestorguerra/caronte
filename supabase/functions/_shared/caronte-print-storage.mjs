@@ -131,8 +131,9 @@ export function createPrintStageArchive({url,serviceKey,fetch:fetchImpl=globalTh
     else {
       const match=/^part:([1-9][0-9]*):([1-9][0-9]*)$/.exec(key);
       const first=Number(match?.[1]),last=Number(match?.[2]);
+      const current=job.source_snapshot?.prompt_version==='caronte-literary-v3',maxPages=current?224:200,minPages=current?216:180;
       if(!match||!Number.isSafeInteger(first)||!Number.isSafeInteger(last)||(first-1)%10||
-          first>200||last>200||last<first||last>first+9||(last!==first+9&&(last<180||last%2)))throw new Error('print_archive_scope');
+          first>maxPages||last>maxPages||last<first||last>first+9||(last!==first+9&&(last<minPages||last%2)))throw new Error('print_archive_scope');
       suffix=`parts/${first}-${last}.pdf`;
     }
     return `${job.session_id}/v${String(job.version).padStart(2,'0')}/${job.id}/${suffix}`;
