@@ -9,12 +9,12 @@ const receipt=(status,advancedSteps=0,completedBundles=0)=>({status,advancedStep
 
 // Independent top-level HTTP requests, not Edge self-wakes. Each request claims
 // one durable step; a timeout stops this invocation without repeating its POST.
-export async function wakePrintQueue({enabled=false,projectUrl,functionsBaseUrl,monitorSecret,
+export async function wakePrintQueue({enabled=false,projectUrl,functionsBaseUrl,workerSecret,
  fetchImpl=globalThis.fetch,maxSteps=50,timeoutMs=120000,totalTimeoutMs=240000,now=Date.now}={}){
  if(enabled!==true)return receipt('disabled');
  let url;
  try{url=recoveryEndpoint(projectUrl,functionsBaseUrl);}catch{fail('print_recovery_configuration_invalid');}
- if(typeof monitorSecret!=='string'||!monitorSecret||monitorSecret.length>4096||/\s/u.test(monitorSecret)||
+ if(typeof workerSecret!=='string'||!workerSecret||workerSecret.length>4096||/\s/u.test(workerSecret)||
   typeof fetchImpl!=='function'||typeof now!=='function'||!Number.isInteger(maxSteps)||maxSteps<1||maxSteps>60||
   !Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>120000||
   !Number.isInteger(totalTimeoutMs)||totalTimeoutMs<1||totalTimeoutMs>300000)fail('print_recovery_configuration_invalid');
@@ -27,7 +27,7 @@ export async function wakePrintQueue({enabled=false,projectUrl,functionsBaseUrl,
   });
   const operation=(async()=>{
    response=await fetchImpl(url,{method:'POST',redirect:'error',signal:controller.signal,
-    headers:{'content-type':'application/json','x-future-book-monitor-secret':monitorSecret},body:JSON.stringify({action:'advancePrint'})});
+    headers:{'content-type':'application/json','x-caronte-print-worker-secret':workerSecret},body:JSON.stringify({action:'advancePrint'})});
    if(!response.ok){void response.body?.cancel().catch(()=>{});fail('print_recovery_http_error');}
    let result;try{result=await response.json();}catch{fail('print_recovery_receipt_invalid');}
    if(!result||typeof result!=='object'||Array.isArray(result)||result.ok!==true)fail('print_recovery_receipt_invalid');
@@ -57,7 +57,7 @@ export async function runPrintRecovery({env=process.env,fetchImpl=globalThis.fet
  write=value=>process.stdout.write(`${value}\n`)}={}){
  try{
   const result=env.CARONTE_PRINT_RECOVERY_ENABLED==='true'?await wakePrintQueue({enabled:true,
-   projectUrl:env.SUPABASE_URL,functionsBaseUrl:env.FUNCTIONS_BASE_URL,monitorSecret:env.FUTURE_BOOK_MONITOR_SECRET,fetchImpl}):receipt('disabled');
+   projectUrl:env.SUPABASE_URL,functionsBaseUrl:env.FUNCTIONS_BASE_URL,workerSecret:env.CARONTE_PRINT_WORKER_SECRET,fetchImpl}):receipt('disabled');
   write(JSON.stringify({event:'caronte_print_recovery',...result}));return result.status==='blocked'?1:0;
  }catch(error){write(JSON.stringify({event:'caronte_print_recovery',...receipt('failed'),
   errorCode:codes.has(error?.code)?error.code:'print_recovery_failed'}));return 1;}

@@ -3528,7 +3528,11 @@ function printEngine() {
 }
 
 async function advancePrint(req: Request, payload: Record<string, unknown>) {
-  if (!serviceRoleKey || req.headers.get('authorization') !== `Bearer ${serviceRoleKey}`) {
+  // This credential is recognized only here. It cannot authenticate book,
+  // monitor, administrator or order actions, and is never accepted in a body.
+  const printSecret = Deno.env.get('CARONTE_PRINT_WORKER_SECRET') || '';
+  const printWorker = Boolean(printSecret && req.headers.get('x-caronte-print-worker-secret') === printSecret);
+  if (!printWorker && (!serviceRoleKey || req.headers.get('authorization') !== `Bearer ${serviceRoleKey}`)) {
     await requireFutureBookMonitorCaller(req, payload);
   }
   if (!printQueueEnabled()) throw new Error('print_queue_disabled');

@@ -149,6 +149,19 @@ export function createPrintStageArchive({url,serviceKey,fetch:fetchImpl=globalTh
       const response=await fetchImpl(`${origin.origin}/storage/v1/object/future-book-pdfs/${receipt.path}`,
         {method:'GET',headers,redirect:'error',signal});
       if(response.status===404){await response.body?.cancel();return null;}
+      // Hosted Storage may wrap its object-not-found status in HTTP 400.
+      // Inspect only a small, deadline-bound error body. Other 400s, missing
+      // buckets, auth failures and ambiguous responses never permit a write.
+      if(response.status===400){
+        const errorBytes=await readBounded({ok:true,body:response.body,headers:response.headers},4096,signal);
+        let error;
+        try{error=JSON.parse(new TextDecoder().decode(errorBytes));}
+        catch{throw new Error('print_archive_unverified');}
+        const codes=[error?.code,error?.error].filter(value=>value!==undefined);
+        if(String(error?.statusCode)==='404'&&error?.message==='Object not found'&&codes.length>0&&
+            codes.every(code=>['not_found','NoSuchKey'].includes(code)))return null;
+        throw new Error('print_archive_unverified');
+      }
       const bytes=await readBounded(response,receipt.byteSize,signal);
       if(bytes.length!==receipt.byteSize||await digest(bytes)!==receipt.sha256)throw new Error('print_archive_mismatch');
       return {...receipt,bytes,verified:true};

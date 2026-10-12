@@ -17,6 +17,7 @@ import {wakePrintQueue} from './wake-caronte-print-queue.mjs';
 const sid='11111111-1111-4111-8111-111111111111',mid='33333333-3333-4333-8333-333333333333';
 const jid='22222222-2222-4222-8222-222222222222',pid='44444444-4444-4444-8444-444444444444';
 const root='https://synthetic-print.supabase.co',service='synthetic-service-key',monitor='synthetic-monitor-key';
+const worker='synthetic-print-worker-secret';
 const tag='a'.repeat(64),sku='0583X0827.BW.STD.PB.060UC444.MXX';
 const stages=createPrintStages({PDFDocument,fontkit,fonts:await loadPrintFonts(readFile)});
 const executable=path=>stripTypeScriptTypes(readFileSync(path,'utf8').replace(/^import .*;\n/gm,'').replace(/^export /gm,''),{mode:'strip'});
@@ -25,9 +26,10 @@ const source=['supabase/functions/_shared/service.ts','supabase/functions/_share
 
 // Execute actual service/auth/CORS/route/coordinator/stage implementations.
 // Only the HTTP DB and remote providers are synthetic. This does not execute SQL.
-function fixture({enabled=true,missingCredentials=false,degraded=false,claimFailure=false,claimLimit=Infinity,role=null,controlLost=false,controlUnconfirmed=false}={}){
+function fixture({enabled=true,missingCredentials=false,degraded=false,claimFailure=false,claimLimit=Infinity,role=null,controlLost=false,controlUnconfirmed=false,printWorkerSecret=''}={}){
  const env={APP_ENV:'production',SUPABASE_URL:root,SUPABASE_SERVICE_ROLE_KEY:service,
   SUPABASE_ANON_KEY:'synthetic-anon',FUTURE_BOOK_MONITOR_SECRET:monitor,FUTURE_BOOK_ADMIN_TOKEN:'synthetic-admin-token',
+  CARONTE_PRINT_WORKER_SECRET:printWorkerSecret,
   CARONTE_PRINT_QUEUE_ENABLED:enabled?'true':'false',FUTURE_BOOK_RATE_LIMIT_DISABLED:'true',
   LULU_ENVIRONMENT:'sandbox',LULU_CLIENT_KEY:missingCredentials?'':'synthetic-client',
   LULU_CLIENT_SECRET:missingCredentials?'':'synthetic-secret'};
@@ -95,9 +97,9 @@ function fixture({enabled=true,missingCredentials=false,degraded=false,claimFail
   console:{error:value=>logs.push(value)},EdgeRuntime:{waitUntil:()=>assert.fail('No recursive/background queue chain')},
   Deno:{env:{get:name=>env[name]||''},serve:value=>{handler=value;}}});
  vm.runInContext(source,context);vm.runInContext(`luluConfigurationTag = async () => '${tag}';`,context);
- const dispatch=async(payload,authorization,secret)=>{
+ const dispatch=async(payload,authorization,secret,customHeaders={})=>{
   const response=await handler(new Request(`${root}/functions/v1/future-book-session`,{method:'POST',
-   headers:{'content-type':'application/json',...(authorization?{authorization}:{}),...(secret?{'x-future-book-monitor-secret':secret}:{})},
+   headers:{...Object.fromEntries(new Headers(customHeaders)),'content-type':'application/json',...(authorization?{authorization}:{}),...(secret?{'x-future-book-monitor-secret':secret}:{})},
    body:JSON.stringify(payload)}));return{status:response.status,data:await response.json()};
  };
  const credentials={sessionId:sid,publicToken:session.public_token};
@@ -240,6 +242,56 @@ test('independent service and monitor requests each complete exactly one real pl
  const status=await app.status();assert.equal(status.data.job.completedSteps,2);assert.equal(status.data.pdf,null);
  assert.equal(app.requests.some(r=>r.url.pathname.startsWith('/functions/')),false);
 });
+test('the dedicated print-worker header authorizes exactly one real planning stage without generic credentials',async()=>{
+ const app=fixture({printWorkerSecret:worker});await app.generate();
+ const result=await app.dispatch({action:'advancePrint',jobId:jid},null,null,{'x-caronte-print-worker-secret':worker});
+ assert.deepEqual(result,{status:200,data:{ok:true,status:'queued',jobId:jid}});
+ assert.equal(app.steps.length,1);assert.equal(app.steps[0].status,'completed');assert.equal(app.steps[0].stage,'plan');
+ assert.equal(app.stageLoads(),1);assert.equal(app.pdfs.length,0);
+ assert.equal(app.requests.filter(r=>r.url.pathname.endsWith('caronte_claim_print_job')).length,1);
+ assert.equal(app.requests.some(r=>r.url.pathname.startsWith('/functions/')),false);
+});
+test('missing, wrong or unconfigured print-worker credentials reject before claim and rendering',async()=>{
+ for(const [configured,provided] of [[worker,undefined],[worker,'foreign-worker-secret'],['',worker]]){
+  const app=fixture({printWorkerSecret:configured});await app.generate();const before=app.requests.length;
+  const result=await app.dispatch({action:'advancePrint',jobId:jid},null,null,
+   provided?{'x-caronte-print-worker-secret':provided}:{});
+  assert.equal(result.status,400);assert.equal(result.data.error,'Invalid admin token');
+  assert.equal(app.requests.length,before);assert.equal(app.stageLoads(),0);assert.equal(app.steps.length,0);
+ }
+});
+test('the print-only secret cannot authorize book, monitor, administration or Lulu-order routes through any carrier',async()=>{
+ const actions=['advanceBook','runAutonomousMonitor','runSyntheticMonitor','adminDashboard','adminMonitor','adminPrintJobs',
+  'adminPrintOrder','adminApprovePrintOrder','adminSubmitPrintOrder','adminSyncPrintOrder','adminReconcilePrintOrder'];
+ for(const action of actions){
+  for(const carrier of ['print-header','monitor-header','job-secret','admin-token']){
+   const app=fixture({printWorkerSecret:worker});
+   const payload={action,jobId:jid,pdfId:pid,...(carrier==='job-secret'?{jobSecret:worker}:{}),
+    ...(carrier==='admin-token'?{adminToken:worker}:{})};
+   const result=await app.dispatch(payload,null,carrier==='monitor-header'?worker:null,
+    carrier==='print-header'?{'x-caronte-print-worker-secret':worker}:{});
+   assert.equal(result.status,400,`${action} rejects ${carrier}`);
+   assert.equal(result.data.error,'Invalid admin token',`${action} has not passed authentication with ${carrier}`);
+   assert.equal(app.requests.length,0);assert.equal(app.stageLoads(),0);assert.equal(app.job,null);
+  }
+ }
+});
+test('a print-only secret in generic monitor or payload fields cannot authorize even a print claim',async()=>{
+ for(const carrier of ['monitor-header','job-secret','admin-token']){
+  const app=fixture({printWorkerSecret:worker});await app.generate();const before=app.requests.length;
+  const payload={action:'advancePrint',jobId:jid,...(carrier==='job-secret'?{jobSecret:worker}:{}),
+   ...(carrier==='admin-token'?{adminToken:worker}:{})};
+  const result=await app.dispatch(payload,null,carrier==='monitor-header'?worker:null);
+  assert.equal(result.status,400);assert.equal(result.data.error,'Invalid admin token');
+  assert.equal(app.requests.length,before);assert.equal(app.stageLoads(),0);assert.equal(app.steps.length,0);
+ }
+});
+test('the dedicated print-worker configuration preserves existing admin-token advancement',async()=>{
+ const app=fixture({printWorkerSecret:worker});await app.generate();
+ const result=await app.dispatch({action:'advancePrint',jobId:jid,adminToken:'synthetic-admin-token'});
+ assert.deepEqual(result,{status:200,data:{ok:true,status:'queued',jobId:jid}});
+ assert.equal(app.steps.length,1);assert.equal(app.steps[0].status,'completed');assert.equal(app.steps[0].stage,'plan');
+});
 test('a disabled worker performs no claim, and an empty enabled queue returns synchronous idle',async()=>{
  const off=fixture({enabled:false}),blocked=await off.dispatch({action:'advancePrint'},`Bearer ${service}`);
  assert.equal(blocked.status,400);assert.equal(blocked.data.error,'print_queue_disabled');assert.equal(off.requests.length,0);
@@ -261,11 +313,24 @@ test('worker database failure returns only a safe diagnostic and never retries t
  assert.equal(app.requests.length,1);assert.doesNotMatch(JSON.stringify({result,logs:app.logs}),/private transport|interview and key/);
 });
 test('the independent executable connects to the actual authenticated route and coordinator, not an acceptance stub',async()=>{
- const app=fixture({claimLimit:2});await app.generate();
- const result=await wakePrintQueue({enabled:true,projectUrl:root,functionsBaseUrl:`${root}/functions/v1`,monitorSecret:monitor,
+ const app=fixture({claimLimit:2,printWorkerSecret:worker});await app.generate();
+ const result=await wakePrintQueue({enabled:true,projectUrl:root,functionsBaseUrl:`${root}/functions/v1`,workerSecret:worker,
   fetchImpl:async(url,options)=>{
    assert.equal(url,`${root}/functions/v1/future-book-session`);
-   const response=await app.dispatch(JSON.parse(options.body),null,new Headers(options.headers).get('x-future-book-monitor-secret'));
+   const response=await app.dispatch(JSON.parse(options.body),null,null,new Headers(options.headers));
+   return Response.json(response.data,{status:response.status});
+  }});
+ assert.deepEqual(result,{status:'idle',advancedSteps:2,completedBundles:0,completionVerified:false});
+ assert.equal(app.steps.length,2);assert.ok(app.steps.every(s=>s.status==='completed'));assert.equal(app.pdfs.length,0);
+});
+test('the print-only recovery executable reaches the actual route using only its dedicated worker header',async()=>{
+ const app=fixture({claimLimit:2,printWorkerSecret:worker});await app.generate();
+ const result=await wakePrintQueue({enabled:true,projectUrl:root,functionsBaseUrl:`${root}/functions/v1`,workerSecret:worker,
+  fetchImpl:async(url,options)=>{
+   assert.equal(url,`${root}/functions/v1/future-book-session`);const headers=new Headers(options.headers);
+   assert.equal(headers.get('x-caronte-print-worker-secret'),worker);assert.equal(headers.get('x-future-book-monitor-secret'),null);
+   assert.equal(headers.get('authorization'),null);assert.deepEqual(JSON.parse(options.body),{action:'advancePrint'});
+   const response=await app.dispatch(JSON.parse(options.body),null,null,headers);
    return Response.json(response.data,{status:response.status});
   }});
  assert.deepEqual(result,{status:'idle',advancedSteps:2,completedBundles:0,completionVerified:false});

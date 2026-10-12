@@ -87,3 +87,90 @@ test('preflight verification and signed-URL response bodies have bounded deadlin
     await new Promise(resolve=>setTimeout(resolve,0));assert.equal(canceled,true);
   }
 });
+
+const stageJob={id:artifactId,session_id:sessionId,version:2};
+const stageKey='part:1:10';
+const stageFile={bytes,byteSize:bytes.length,sha256};
+function stageFixture({missingBody,missingStatus=400,corruptRead=false}={}){
+  const calls=[],objects=new Map();
+  const archive=storage.createPrintStageArchive({url:'https://storage.test',serviceKey:'synthetic-key',
+    fetch:async(url,init)=>{
+      calls.push({url,method:init.method,upsert:init.headers['x-upsert']});
+      if(init.method==='POST'){
+        objects.set(url,new Uint8Array(init.body));
+        return new Response('{}',{status:200});
+      }
+      if(!objects.has(url))return new Response(missingBody,{status:missingStatus,
+        headers:{'Content-Type':'application/json'}});
+      const remote=new Uint8Array(objects.get(url));
+      if(corruptRead)remote[remote.length-1]^=1;
+      return new Response(remote,{status:200,headers:{'Content-Type':'application/pdf'}});
+    }});
+  return {archive,calls,objects,receipt:{path:archive.path(stageJob,stageKey),byteSize:bytes.length,sha256}};
+}
+const hostedMissingObjects=[
+  ['hosted legacy not_found', {statusCode:'404',error:'not_found',message:'Object not found'}],
+  ['modern NoSuchKey error', {statusCode:'404',error:'NoSuchKey',message:'Object not found'}],
+  ['modern NoSuchKey code', {statusCode:'404',code:'NoSuchKey',message:'Object not found'}]
+];
+for(const [name,payload] of hostedMissingObjects){
+  test(`stage archive recognizes ${name} at HTTP 400 and stores the exact reserved PDF once`,async()=>{
+    const app=stageFixture({missingBody:JSON.stringify(payload)});
+    assert.equal(await app.archive.read(stageJob,stageKey,app.receipt),null);
+    const result=await app.archive.write(stageJob,stageKey,stageFile);
+    assert.deepEqual(result,{...app.receipt,verified:true});
+    const recovered=await app.archive.read(stageJob,stageKey,app.receipt);
+    assert.deepEqual(recovered.bytes,bytes);
+    assert.equal(recovered.sha256,sha256);
+    assert.equal(recovered.verified,true);
+    await app.archive.write(stageJob,stageKey,stageFile);
+    const uploads=app.calls.filter(call=>call.method==='POST');
+    assert.equal(uploads.length,1);
+    assert.equal(uploads[0].upsert,'false');
+    assert.ok(app.calls.every(call=>call.url===`https://storage.test/storage/v1/object/future-book-pdfs/${app.receipt.path}`));
+    assert.deepEqual(app.objects.get(uploads[0].url),bytes);
+  });
+}
+test('hosted missing-object recognition never skips checksum verification after upload',async()=>{
+  const app=stageFixture({missingBody:JSON.stringify(hostedMissingObjects[0][1]),corruptRead:true});
+  await assert.rejects(app.archive.write(stageJob,stageKey,stageFile),/print_archive_mismatch/);
+  assert.equal(app.calls.filter(call=>call.method==='POST').length,1);
+});
+const unsafeStageResponses=[
+  ['malformed JSON',400,'{"statusCode":"404"'],
+  ['InvalidJWT',400,JSON.stringify({statusCode:'404',error:'InvalidJWT',message:'Object not found'})],
+  ['AccessDenied',400,JSON.stringify({statusCode:'404',error:'AccessDenied',message:'Object not found'})],
+  ['NoSuchBucket',400,JSON.stringify({statusCode:'404',error:'NoSuchBucket',message:'Object not found'})],
+  ['legacy not_found for another failure',400,JSON.stringify({statusCode:'404',error:'not_found',message:'Bucket not found'})],
+  ['legacy not_found without its exact missing status',400,JSON.stringify({statusCode:'400',error:'not_found',message:'Object not found'})],
+  ['unrecognized JSON error',400,JSON.stringify({statusCode:'404',error:'bad_request',message:'Object not found'})],
+  ['HTTP 401 with missing-looking JSON',401,JSON.stringify(hostedMissingObjects[0][1])],
+  ['HTTP 403 with missing-looking JSON',403,JSON.stringify(hostedMissingObjects[0][1])]
+];
+for(const [name,status,body] of unsafeStageResponses){
+  test(`stage archive never authorizes upload from ${name}`,async()=>{
+    const app=stageFixture({missingBody:body,missingStatus:status});
+    await assert.rejects(app.archive.read(stageJob,stageKey,app.receipt),/print_archive_unverified/);
+    await assert.rejects(app.archive.write(stageJob,stageKey,stageFile),/print_archive_unverified/);
+    assert.equal(app.calls.filter(call=>call.method==='POST').length,0);
+    assert.equal(app.objects.size,0);
+  });
+}
+test('oversized HTTP 400 missing-looking error JSON cannot authorize upload',async()=>{
+  const app=stageFixture({missingBody:JSON.stringify({...hostedMissingObjects[0][1],padding:'x'.repeat(131072)})});
+  await assert.rejects(app.archive.write(stageJob,stageKey,stageFile),/print_archive_(?:unverified|mismatch)/);
+  assert.equal(app.calls.filter(call=>call.method==='POST').length,0);
+});
+test('a stalled HTTP 400 error body has a bounded deadline and is canceled before any upload',async()=>{
+  let canceled=false,uploads=0;
+  const archive=storage.createPrintStageArchive({url:'https://storage.test',serviceKey:'synthetic-key',timeoutMs:15,
+    fetch:async(url,init)=>{
+      if(init.method==='POST'){uploads++;return new Response('{}');}
+      return new Response(new ReadableStream({cancel(){canceled=true;}}),{status:400,
+        headers:{'Content-Type':'application/json'}});
+    }});
+  await assert.rejects(archive.write(stageJob,stageKey,stageFile),/print_archive_timeout/);
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(canceled,true);
+  assert.equal(uploads,0);
+});

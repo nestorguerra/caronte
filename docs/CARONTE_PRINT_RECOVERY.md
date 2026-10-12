@@ -1,7 +1,10 @@
 # Flujo de imprenta por etapas: contrato y activación pendiente
 
-12 de octubre de 2026. Implementado y probado localmente. **No desplegado**.
-Objetivo completo y tareas 07–11 abiertos. No se han creado pedidos ni pagos.
+12 de octubre de 2026. El corte inicial de este documento era local. El servidor
+y la generación de un par técnico completo ya se han desplegado y verificado;
+véase el [corte alojado](CARONTE_HOSTED_VERIFICATION_2026-10-12.md).
+La recuperación automática sigue pendiente de autorización y activación.
+Objetivo completo abierto. No se han creado pedidos ni pagos.
 
 ## Contrato HTTP existente, ampliado sin cambiar la página
 
@@ -12,7 +15,7 @@ La función sigue siendo `future-book-session`. HTML/CSS de Tiresias idénticos 
 | --- | --- | --- |
 | `generatePdf` | `sessionId` + `publicToken`, fuente literaria aprobada y gate de activación. | `{ok,session,job,pdf}`; reserva una vez. Mientras procesa, `pdf=null`. |
 | `getPdfStatus` | Las mismas credenciales de sesión. Solo lectura; no renderiza ni reencola. | Progreso privado mínimo y, al terminar, el par confirmado mediante `publicPdf`. |
-| `advancePrint` | Bearer de servicio exacto o autorización del monitor/operador existente. `jobId` UUID opcional, nunca un manifiesto del cliente. | Una sola etapa síncrona: `idle`, `queued`, `blocked` o `ready` con sus IDs aplicables. |
+| `advancePrint` | Cabecera privada `x-caronte-print-worker-secret`, Bearer de servicio exacto o autorización del monitor/operador existente. `jobId` UUID opcional, nunca un manifiesto del cliente. | Una sola etapa síncrona: `idle`, `queued`, `blocked` o `ready` con sus IDs aplicables. |
 | `adminPrintJobs` / `adminPrintJob` | Administrador con permiso de lectura. Lista paginada `limit=1..100`, `offset=0..10000`, o UUID del trabajo. | Estado, versión, etapas y hashes mínimos; sin fuente ni outputs. |
 | `adminResumePrint` / `adminCancelPrint` | Operaciones/propietario, UUID, `expectedRevision` y motivo de 8–1000 caracteres. | Detalle releído y decisión exacta confirmada, o error seguro. |
 
@@ -51,8 +54,13 @@ el disparador siguiente, no se deduce de estas pruebas del navegador.
 ## Disparador independiente preparado
 
 `scripts/wake-caronte-print-queue.mjs` inicia peticiones HTTP de nivel superior,
-no self-wakes recursivos de Edge. Cada una usa la autenticación del monitor y
-solo `{action:'advancePrint'}`. El claim SQL seleccionará trabajo elegible.
+no self-wakes recursivos de Edge. Cada una usa exclusivamente
+`CARONTE_PRINT_WORKER_SECRET` mediante `x-caronte-print-worker-secret` y solo
+`{action:'advancePrint'}`. El claim SQL seleccionará trabajo elegible.
+No lee ni recibe el secreto general del monitor. El servidor reconoce esta
+credencial solo en `advancePrint`; no acepta este valor en campos de payload
+ni como permiso de modelos, administración, monitorización o pedidos Lulu.
+El acceso de servicio y de los operadores existentes se conserva.
 
 - Apagado por defecto; ni siquiera lee el secreto cuando no está activado.
 - HTTPS del mismo proyecto Supabase, sin credenciales en URL, redirects ni tokens
