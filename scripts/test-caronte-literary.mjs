@@ -119,6 +119,17 @@ test('current Sol stages reserve reasoning space without increasing prose length
   assert.equal(buildStageRequest({stage:'biography',interview:interview()}).maxOutputTokens,14000);
   assert.match(buildCurrentStageRequest({stage:'draft',interview:interview(),artifacts:current,unit:units()[0]}).prompt,/1800–2200/);
 });
+test('approved Opus output budgets apply only to the thirty-year contract and preserve strict evidence gates',()=>{
+  const current=completed();current.biography.age.future=80;current.world.narratorAge=80;
+  const context={stage:'review',interview:interview(),artifacts:current,unit:units()[0],draft:draft()};
+  assert.equal(buildCurrentStageRequest(context).maxOutputTokens,16000);
+  assert.equal(buildCurrentStageRequest({...context,stage:'longitudinal'}).maxOutputTokens,25000);
+  const legacy={...context,artifacts:completed()};
+  assert.equal(buildStageRequest(legacy).maxOutputTokens,6000);
+  assert.equal(buildStageRequest({...legacy,stage:'longitudinal'}).maxOutputTokens,14000);
+  const unsupported=currentReview();unsupported.evidence=[];
+  assert.throws(()=>validateCurrentArtifact('review',unsupported,context),/evidence|evidencia/i);
+});
 test('current reviews require exact full-text evidence for every dimension rather than unsupported scores',()=>{
   const context={artifacts:artifacts(),unit:units()[0],draft:draft()};
   const noEvidence=currentReview();delete noEvidence.evidence;

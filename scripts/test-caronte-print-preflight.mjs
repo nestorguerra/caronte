@@ -177,21 +177,43 @@ for(const [label,errors] of [['null',null],['missing',undefined]]) {
     assert.equal(app.record().lulu_metadata.send_to_lulu,false);
     assert.deepEqual(app.calls.filter(call=>['post','get'].includes(call[0])),[['post','interior'],['get','interior',7],['post','cover'],['get','cover',9]]);
   });
-  test(`a NORMALIZED GET with ${label} errors preserves the receipt and requires a later explicit empty array`,async()=>{
+  test(`a NORMALIZED GET with ${label} errors follows the documented same-ID result, never repeats submission`,async()=>{
     const incomplete={id:7,status:'NORMALIZED',source_url:'https://storage.test/interior.pdf?token=private',
       page_count:'194',valid_pod_package_ids:[sku]};
     if(errors!==undefined)incomplete.errors=errors;
     const app=fixture({interiorGet:incomplete});
     await app.service.run(artifact);await app.service.run(artifact);
-    assert.equal(app.record().print_validation.preflight.interior.state,'pending');
+    assert.equal(app.record().print_validation.preflight.interior.state,errors===null?'normalized':'pending');
     assert.equal(app.record().print_validation.preflight.interior.validation_id,7);
     assert.equal(app.record().print_validation.ready_for_print,false);
-    const resumed=fixture({row:app.record()});
-    await resumed.service.run(artifact);
-    assert.equal(resumed.record().print_validation.preflight.interior.state,'normalized');
-    assert.deepEqual(resumed.calls.filter(call=>['post','get'].includes(call[0])),[['get','interior',7]]);
+    if(errors===null){
+      assert.equal(app.record().print_validation.preflight.interior.errors_representation,'null');
+      assert.equal(app.record().print_validation.preflight.interior.normalization_receipt_source,'same-id-get');
+    }else{
+      const resumed=fixture({row:app.record()});
+      await resumed.service.run(artifact);
+      assert.equal(resumed.record().print_validation.preflight.interior.state,'normalized');
+      assert.deepEqual(resumed.calls.filter(call=>['post','get'].includes(call[0])),[['get','interior',7]]);
+    }
   });
 }
+test('real Lulu NORMALIZED/null GET shapes can confirm both exact files; null does not bypass page or SKU checks',async()=>{
+  const interior={id:7,status:'NORMALIZED',errors:null,source_url:'https://storage.test/interior.pdf?token=private',
+    page_count:194,valid_pod_package_ids:[sku]};
+  const cover={id:9,status:'NORMALIZED',errors:null,source_url:'https://storage.test/cover.pdf?token=private'};
+  const app=fixture({interiorGet:interior,coverGet:cover});
+  for(let i=0;i<4;i++)await app.service.run(artifact);
+  assert.equal(app.record().print_validation.ready_for_print,true);
+  assert.equal(app.record().lulu_metadata.send_to_lulu,false);
+  assert.equal(app.record().print_validation.preflight.cover.errors_representation,'null');
+  assert.equal(app.record().print_validation.preflight.cover.normalization_receipt_source,'same-id-get');
+  for(const patch of [{page_count:193},{valid_pod_package_ids:[]},{status:'VALIDATED'},{status:'ERROR'}]){
+    const invalid=fixture({interiorGet:{...interior,...patch}});
+    await invalid.service.run(artifact);await invalid.service.run(artifact);
+    assert.equal(invalid.record().print_validation.ready_for_print,false);
+    assert.notEqual(invalid.record().print_validation.preflight.interior.state,'normalized');
+  }
+});
 test('an unknown creation status retains the validated receipt identity but remains uncertain without replaying',async()=>{
   const app=fixture({interiorPost:{id:7,status:'NEW_PROVIDER_STATUS',
     source_url:'https://storage.test/interior.pdf?token=private',errors:[]}});

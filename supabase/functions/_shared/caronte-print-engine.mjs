@@ -1,5 +1,5 @@
 import {countWords,resolveLiteraryContract} from './caronte-literary.mjs';
-import {PRINT_TEMPLATE,printSizesFor} from './caronte-print.mjs';
+import {PRINT_TEMPLATE,printSizesFor,compactPrintChapterPlan} from './caronte-print.mjs';
 
 export const PRINT_JOB_VERSION='caronte-a5-chunks-v1';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -16,6 +16,11 @@ const initialFor=source=>Array.from({length:5},(_,index)=>printSizesFor(source).
 function schedule(completed,source){
   const initial=initialFor(source),pages=resolveLiteraryContract(source.prompt_version).physicalPages;
   for(const step of initial)if(!completed.has(step.key))return step;
+  if(!completed.has('compose'))for(const item of initial){
+    const plan=completed.get(item.key),key=item.key.replace('plan:','geometry:');
+    if(plan.plan_format!=='chapter-counts-v1'&&!completed.has(key))
+      return {...item,key,operation:'compact',originalKey:item.key};
+  }
   if(!completed.has('compose'))return{key:'compose',stage:'compose'};
   const manifest=completed.get('compose').output,count=manifest?.layout?.pages?.length;
   if(!Number.isSafeInteger(count)||count<pages.min||count>pages.max||count%2||manifest.proof!==false)fail('print_layout_identity');
@@ -29,7 +34,8 @@ function schedule(completed,source){
 function publicJob(job,steps){
   const count=steps.filter(step=>step.status==='completed').length;
   const pages=steps.find(step=>step.step_key==='compose'&&step.status==='completed')?.output?.layout?.pages?.length;
-  const total=initialFor(job.source_snapshot).length+1+Math.ceil((pages||resolveLiteraryContract(job.source_snapshot?.prompt_version).physicalPages.max)/10)+2+1;
+  const extra=steps.filter(step=>step.step_key.startsWith('plan:')&&step.status==='completed'&&step.plan_format!=='chapter-counts-v1').length;
+  const total=initialFor(job.source_snapshot).length+extra+1+Math.ceil((pages||resolveLiteraryContract(job.source_snapshot?.prompt_version).physicalPages.max)/10)+2+1;
   return{id:job.id,status:job.status,stage:job.stage,completedSteps:count,totalSteps:total,
     progress:job.status==='ready'?100:Math.min(98,Math.floor(count/total*100)),
     errorCode:job.error_code||null,createdAt:job.created_at,updatedAt:job.updated_at};
@@ -48,13 +54,31 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
     }
   };
   const readJob=async(sessionId)=>first(await rest(`future_book_print_jobs?session_id=eq.${encode(sessionId)}&select=*&order=created_at.desc&limit=1`));
-  const readSteps=async(jobId)=>{
-    const rows=await rest(`future_book_print_steps?job_id=eq.${encode(jobId)}&select=*&order=created_at.asc,step_key.asc`);
+  const readSteps=async(jobId,mode='summary')=>{
+    const fields=mode==='nonPlan'?'*':'step_key,stage,status,attempt,input_hash,output_hash,error_code,plan_format:output->>format';
+    const rows=await rest(`future_book_print_steps?job_id=eq.${encode(jobId)}&select=${fields}${mode==='nonPlan'?'&stage=neq.plan':''}&order=created_at.asc,step_key.asc`);
     if(!Array.isArray(rows))fail('print_storage_unavailable');return rows;
+  };
+  const chapterPlans=async(job,completed)=>{
+    const originals=initialFor(job.source_snapshot).map(step=>step.key);
+    const keys=originals.map(key=>completed.get(key).plan_format==='chapter-counts-v1'?key:key.replace('plan:','geometry:')),plans=[];
+    for(let at=0;at<keys.length;at+=5){
+      const batch=keys.slice(at,at+5),rows=await rest(`future_book_print_steps?job_id=eq.${encode(job.id)}&step_key=in.(${batch.map(encode).join(',')})&select=*`);
+      if(!Array.isArray(rows)||rows.length!==batch.length)fail('print_step_receipt_corrupt');
+      for(const key of batch){
+        const row=rows.find(item=>item.step_key===key);
+        if(row?.status!=='completed'||row.stage!=='plan'||!row.output||
+          await printJobFingerprint(row.output)!==row.output_hash)fail('print_step_receipt_corrupt');
+        if(key.startsWith('geometry:')&&(row.output.originalPlanKey!==key.replace('geometry:','plan:')||
+          row.output.originalPlanHash!==completed.get(row.output.originalPlanKey)?.output_hash))fail('print_step_receipt_corrupt');
+        plans.push(await compactPrintChapterPlan(row.output));
+      }
+    }
+    return plans;
   };
   const readPdf=async(job)=>{
     const pdf=first(await rest(`future_book_pdfs?id=eq.${encode(job.pdf_id)}&session_id=eq.${encode(job.session_id)}&select=*&limit=1`));
-    const steps=await readSteps(job.id);
+    const steps=await readSteps(job.id,'nonPlan');
     const interior=steps.find(step=>step.step_key==='interior'&&step.status==='completed');
     const cover=steps.find(step=>step.step_key==='cover'&&step.status==='completed');
     if(!interior?.output?.storage_verified||!cover?.output?.storage_verified||
@@ -106,7 +130,9 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
     if(jobId!==null&&!uuid.test(jobId))fail('print_job_scope');
     const claimed=first(await rpc('caronte_claim_print_job',{p_job_id:jobId}));
     if(!claimed?.id)return{status:'idle'};
-    const job=structuredClone(claimed),steps=structuredClone(await readSteps(job.id));
+    const job=structuredClone(claimed),summaries=await readSteps(job.id),details=await readSteps(job.id,'nonPlan');
+    const steps=summaries.map(row=>row.stage==='plan'?row:details.find(detail=>detail.step_key===row.step_key));
+    if(steps.some(row=>!row))fail('print_storage_unavailable');
     let step;
     const checkpoint=async(record,state,delay=0)=>{
       if(await rpc('caronte_checkpoint_print_job',{
@@ -127,14 +153,18 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
       for(const record of steps){
         if(record.output&&await printJobFingerprint(record.output)!==record.output_hash)fail('print_step_receipt_corrupt');
         if(record.status==='completed'){
-          if(completed.has(record.step_key)||!record.output)fail('print_step_receipt_corrupt');
+          if(completed.has(record.step_key)||(!record.output&&record.stage!=='plan')||
+            !/^[a-f0-9]{64}$/.test(record.output_hash||''))fail('print_step_receipt_corrupt');
           completed.set(record.step_key,record);
         }
       }
       const next=schedule(completed,job.source_snapshot),previous=steps.find(record=>record.step_key===next.key);
       const inputHash=await printJobFingerprint({jobId:job.id,pdfId:job.pdf_id,version:job.version,
         source:job.source_sha256,identity:job.input_hash,createdAt:new Date(job.created_at).toISOString(),stage:next,
-        receipts:[...completed].sort(([a],[b])=>a.localeCompare(b)).map(([key,value])=>[key,value.output_hash])});
+        // Geometry is a derived cache. Keep pre-existing stage fingerprints and
+        // frozen render identities unchanged when adapting legacy receipts.
+        receipts:[...completed].filter(([key])=>!key.startsWith('geometry:'))
+          .sort(([a],[b])=>a.localeCompare(b)).map(([key,value])=>[key,value.output_hash])});
       if(previous?.input_hash&&previous.input_hash!==inputHash)fail('print_step_input_changed');
       step={step_key:next.key,stage:next.stage,status:'started',attempt:previous?.attempt||0,input_hash:inputHash,
         output:previous?.output||null,output_hash:previous?.output_hash||null};
@@ -190,8 +220,15 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
         }
       }
       let output;
-      if(next.stage==='plan')output=await stages.planChapter(source,next.index,{size:next.size});
-      else if(next.stage==='compose')output=await stages.composeLayout(source,initialFor(source).map(value=>completed.get(value.key).output),
+      if(next.operation==='compact'){
+        const original=first(await rest(`future_book_print_steps?job_id=eq.${encode(job.id)}&step_key=eq.${encode(next.originalKey)}&select=*&limit=1`));
+        if(original?.status!=='completed'||!original.output||original.output_hash!==completed.get(next.originalKey)?.output_hash||
+          await printJobFingerprint(original.output)!==original.output_hash)fail('print_step_receipt_corrupt');
+        const compact=await compactPrintChapterPlan(original.output);
+        const record={...compact,originalPlanKey:next.originalKey,originalPlanHash:original.output_hash};delete record.sha256;
+        output={...record,sha256:await printJobFingerprint(record)};
+      }else if(next.stage==='plan')output=await stages.planChapter(source,next.index,{size:next.size,compact:true});
+      else if(next.stage==='compose')output=await stages.composeLayout(source,await chapterPlans(job,completed),
         {createdAt:new Date(job.created_at).toISOString(),proof:false});
       else if(next.stage==='part')output=await stages.renderInteriorPart(source,manifest,next);
       else if(next.stage==='interior'){

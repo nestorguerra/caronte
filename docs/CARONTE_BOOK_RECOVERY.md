@@ -1,7 +1,9 @@
 # Recuperación de la escritura
 
-Corte local del 12 de octubre de 2026. Preparado y probado con límites sintéticos.
-No publicado, desplegado ni activado. No acredita un libro real ni autonomía remota.
+Corte del 12 de octubre de 2026. Publicado, desplegado y activado con autorización
+humana específica. Ejecución GitHub 38253812749 completada: el aviso fue aceptado y
+el servidor avanzó la revisión del trabajo privado existente. No acredita todavía
+un libro completo ni su calidad literaria.
 
 ## Problema y recorrido
 
@@ -22,18 +24,18 @@ bloqueado; el respaldo no lo reanuda, concilia, cancela ni borra automáticament
 Si el aviso inmediato siguiente se pierde, otra ejecución independiente vuelve
 a poder reclamar trabajo elegible. Un lease vigente o una fecha futura no se saltan.
 
-## Desactivado y sin credenciales publicadas
+## Activación explícita y sin credenciales publicadas
 
 El trabajo de GitHub exige la variable de repositorio
 `CARONTE_BOOK_RECOVERY_ENABLED == 'true'` y la rama predeterminada, también en
 ejecuciones manuales. El ejecutable repite el control: sin ese valor exacto no
-lee el secreto ni hace una petición. No se ha creado/cambiado esa variable.
+lee el secreto ni hace una petición. Tras la autorización se verificó `true`.
 
 Entorno operativo preparado: `caronte-book-operations`. El paso recibe solo
 `SUPABASE_URL`, `FUNCTIONS_BASE_URL`, el interruptor y
-`FUTURE_BOOK_MONITOR_SECRET` privado. No recibe claves de modelos, Lulu ni la clave
-service-role. Este secreto debe coincidir con el autorizado en el servidor.
-No se ha creado el entorno ni copiado/configurado un secreto en GitHub/Supabase.
+`CARONTE_BOOK_WORKER_SECRET` exclusivo. No recibe claves de modelos, Lulu ni la clave
+service-role ni el secreto de imprenta/monitor. La huella SHA256 de Supabase coincide
+con la copia privada; el secreto cifrado de GitHub y su ejecución real se verificaron.
 El workflow no es CI de pruebas con credenciales de producción, ni despliegue.
 
 El destino debe ser el endpoint estándar HTTPS del mismo proyecto Supabase.
@@ -81,6 +83,16 @@ modelos, credenciales/destino de almacenamiento confirmados, migración/lease/RL
 remotos comprobados, prueba real de interrupción y recuperación, revisión de logs
 y presupuesto del piloto. Activar puede continuar llamadas de modelo de pago.
 Este corte no autoriza ese gasto ni añade un límite financiero global al motor.
+
+La activación posterior sí recibió autorización expresa para avanzar libros ya
+puestos en cola, incluido su consumo de Sol y Opus. No autoriza nuevos pedidos ni
+pagos. La clave real fue rechazada al intentar rutas de administración/imprenta.
+Una recuperación técnica separada, exclusiva de operador, consumió una aprobación
+para repetir solo la primera revisión truncada de Opus (6000 a 16000 tokens).
+Conserva el recibo anterior completo y su consumo, exige el mismo hash de texto,
+es idempotente tras perder un acuse y rechaza incertidumbre/refusal/segunda repetición.
+El trabajador no tiene acceso a esa operación. La revisión repetida terminó y
+exigió una reescritura: no se rebajó el criterio editorial para aprobar el texto.
 
 La recuperación se detiene desactivando su variable. Eso no cancela una petición
 ya aceptada ni los avisos que ya funcionan en Edge. No modificar o cancelar trabajos

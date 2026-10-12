@@ -66,20 +66,27 @@ export function createPrintPreflight({environment,read,compareAndSet,verifyFile,
         await sha(data.source_url)!==intent.source_url_sha256) {
       return {...intent,state:creation?'uncertain':'failed',error_code:'validation_receipt_invalid',checked_at:stamp()};
     }
-    const base={...intent,validation_id:data.id,checked_at:stamp()};
+    const {error_code:previousError,...retainedIntent}=intent;
+    const base={...retainedIntent,validation_id:data.id,checked_at:stamp()};
     if(!LULU_VALIDATION_STATUSES[kind].includes(data.status)||
       (data.errors!==undefined&&data.errors!==null&&!Array.isArray(data.errors)))return{
         ...base,state:creation?'uncertain':'failed',error_code:'validation_receipt_invalid'};
     base.provider_status=data.status;
-    if(data.errors===undefined||data.errors===null)return{
+    // Lulu's official spec defines NORMALIZED as successful normalization and
+    // examples use null for the optional errors field. Trust that shape only on
+    // an authoritative same-ID GET, never an initial POST or a missing field.
+    const confirmedNullErrors=!creation&&data.status==='NORMALIZED'&&data.errors===null;
+    if(data.errors===undefined||(data.errors===null&&!confirmedNullErrors))return{
       ...base,state:data.status==='ERROR'?'failed':'pending',error_code:data.status==='ERROR'?'lulu_validation_failed':'validation_errors_pending'};
-    if(data.status==='ERROR'||data.errors.length)return {...base,state:'failed',error_code:'lulu_validation_failed'};
+    if(data.status==='ERROR'||(Array.isArray(data.errors)&&data.errors.length))return {...base,state:'failed',error_code:'lulu_validation_failed'};
     if(data.status!=='NORMALIZED')return {...base,state:'pending'};
     if(kind==='interior'&&(!/^[0-9]+$/.test(String(data.page_count))||Number(data.page_count)!==binding.page_count||
         !Array.isArray(data.valid_pod_package_ids)||!data.valid_pod_package_ids.includes(binding.pod_package_id))) {
       return {...base,state:'failed',error_code:'validation_print_spec_mismatch'};
     }
-    return {...base,state:'normalized',...(kind==='interior'?{page_count:binding.page_count,pod_package_id:binding.pod_package_id}:{})};
+    return {...base,state:'normalized',errors_representation:confirmedNullErrors?'null':'empty-array',
+      normalization_receipt_source:creation?'creation':'same-id-get',
+      ...(kind==='interior'?{page_count:binding.page_count,pod_package_id:binding.pod_package_id}:{})};
   }
   async function run(pdfId) {
     const row=await read(pdfId);

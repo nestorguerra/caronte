@@ -57,8 +57,13 @@ export function printDatabase(){
   }
   if(path.startsWith('future_book_print_jobs?'))return job?[copy(job)]:[];
   if(path.startsWith('future_book_print_steps?')){
-   const filter=new URLSearchParams(path.split('?')[1]).get('step_key');
-   const result=copy(filter?steps.filter(s=>s.step_key===filter.slice(3)):steps);
+   const params=new URLSearchParams(path.split('?')[1]),filter=params.get('step_key');
+   let selected=filter?.startsWith('eq.')?steps.filter(s=>s.step_key===filter.slice(3)):
+    filter?.startsWith('in.(')?steps.filter(s=>filter.slice(4,-1).split(',').includes(s.step_key)):steps;
+   if(params.get('stage')==='neq.plan')selected=selected.filter(s=>s.stage!=='plan');
+   const fields=params.get('select');
+   const result=copy(fields&&fields!=='*'?selected.map(s=>Object.fromEntries(fields.split(',').map(k=>
+    k==='plan_format:output->>format'?['plan_format',s.output?.format]:[k,s[k]]))):selected);
    if(alterIntentRead&&result.some(s=>s.output?.path)){
     alterIntentRead=false;result.at(-1).output_hash='0'.repeat(64);
    }
@@ -84,7 +89,11 @@ function fixture({pages=194}={}){
   return objects.has(url)?new Response(objects.get(url)):new Response('',{status:404});
  }});
  const stages={
-  planChapter:async(source,index,{size})=>({chapterIndex:index,size,sourceFingerprint:sha(source)}),
+  planChapter:async(source,index,{size})=>{
+    const record={chapterIndex:index,sourceFingerprint:sha(source),format:'chapter-counts-v1',
+      candidates:[{size,leading:size*1.4,pageCount:44,paragraphCount:30}]};
+    return {...record,sha256:sha(record)};
+  },
   composeLayout:async(source,plans,{createdAt})=>({sourceFingerprint:sha(source),createdAt,wordCount:48300,proof:false,
    layoutHash:'b'.repeat(64),manifestHash:'c'.repeat(64),layout:{pages:Array(pages).fill({}),paragraphCount:150,size:13,leading:18.2,margins:{},chapterStarts:[]}}),
   renderInteriorPart:async(source,manifest,{firstPage,lastPage})=>{renders++;return{bytes,byteSize:bytes.length,sha256:sha(bytes),
@@ -115,6 +124,40 @@ test('a new +30 job finishes 220-page parts and binds the version on its PDF wit
   assert.equal(app.db.pdfs[0].metadata.literary_contract_version,'caronte-literary-v3');
   assert.ok(app.db.steps.some(step=>step.step_key==='part:211:220'));
   assert.equal(app.db.pdfs[0].print_validation.ready_for_print,false);
+});
+test('a resumed large plan queue never downloads the full accumulated plan corpus at once',async()=>{
+  const app=fixture({pages:220}),base=app.db.rest;
+  const rest=async(path,options)=>{
+    if(path.startsWith('future_book_print_steps?')){
+      const q=new URLSearchParams(path.split('?')[1]);
+      if(q.get('select')==='*'&&!q.has('step_key')&&q.get('stage')!=='neq.plan'&&app.db.steps.length>=85)
+        throw Error('hosted receipt payload exceeds the resource envelope');
+      if(q.get('step_key')?.startsWith('in.('))assert.ok(q.get('step_key').slice(4,-1).split(',').length<=5);
+    }
+    return base(path,options);
+  };
+  const worker=()=>app.engine({rest});
+  await worker().enqueue(sid,{...manuscript(),manuscript:printManuscriptThirty()});
+  for(let n=0;n<140&&app.db.job.status!=='ready';n++){
+    const result=await worker().advance();assert.notEqual(result.status,'blocked',result.errorCode);
+  }
+  assert.equal(app.db.job.status,'ready');assert.equal(app.db.pdfs[0].page_count,220);
+});
+test('legacy full plan receipts are compacted one per durable claim and remain immutable',async()=>{
+  const app=fixture(),base=app.stages.planChapter;
+  app.stages.planChapter=async(source,index,options)=>{
+    const value=await base(source,index,options);delete value.format;delete value.sha256;
+    value.candidates=value.candidates.map(({pageCount,...c})=>({...c,pages:Array(pageCount).fill({})}));
+    return {...value,sha256:sha(value)};
+  };
+  await app.engine().enqueue(sid,manuscript());for(let i=0;i<25;i++)await app.engine().advance();
+  const originals=structuredClone(app.db.steps),before=app.db.steps.length;
+  const converted=await app.engine().advance();assert.equal(converted.status,'queued');
+  assert.equal(app.db.steps.length,before+1);assert.equal(app.db.steps.at(-1).step_key,'geometry:0:12');
+  assert.equal(app.db.steps.at(-1).output.originalPlanHash,originals[0].output_hash);
+  assert.deepEqual(app.db.steps.slice(0,25),originals);
+  for(let i=0;i<55&&app.db.job.status!=='ready';i++)await app.engine().advance();
+  assert.equal(app.db.job.status,'ready');assert.deepEqual(app.db.steps.slice(0,25),originals);
 });
 test('changed source, degraded manuscript or absent editorial gate cannot start another active print',async()=>{
  const app=fixture();await app.engine().enqueue(sid,manuscript());
@@ -203,6 +246,15 @@ test('unconfirmed intent acceptance or mismatched readback cannot authorize any 
 });
 for(const modern of [false,true])test(`real ${modern?'+30 / 216-224':'legacy +40 / 180-200'} staged PDFs survive a worker replacement and retain the complete frozen layout`,async()=>{
  const db=printDatabase(),objects=new Map();let uploads=0;
+ const coverText=[];
+ const observedPdf={load:PDFDocument.load.bind(PDFDocument),async create(...args){
+  const doc=await PDFDocument.create(...args),add=doc.addPage.bind(doc);
+  doc.addPage=(...pageArgs)=>{
+   const page=add(...pageArgs),draw=page.drawText.bind(page);
+   page.drawText=(text,options)=>{if(options?.color)coverText.push(text);return draw(text,options);};
+   return page;
+  };return doc;
+ }};
  const archive=createPrintStageArchive({url:'https://storage.test',serviceKey:'synthetic-key',fetch:async(url,init)=>{
   if(init.method==='POST'){
    uploads++;if(objects.has(url))return new Response('',{status:409});
@@ -218,7 +270,7 @@ for(const modern of [false,true])test(`real ${modern?'+30 / 216-224':'legacy +40
   chapter.paragraphs[p]=words.join(' ');
  }
  const engine=()=>createPrintEngine({rest:db.rest,archive,settings,
-  stages:createPrintStages({PDFDocument,fontkit,fonts}),coverDimensions:async(job,count)=>({
+  stages:createPrintStages({PDFDocument:observedPdf,fontkit,fonts}),coverDimensions:async(job,count)=>({
    ...prototypeCoverDimensions(count),source:'lulu-api',environment:job.lulu_environment,
    podPackageId:job.pod_package_id,pageCount:count})});
  await engine().enqueue(sid,row);
@@ -240,6 +292,7 @@ for(const modern of [false,true])test(`real ${modern?'+30 / 216-224':'legacy +40
  }else assert.equal(pageCount,194);
  assert.equal(uploads,Math.ceil(pageCount/10)+2);
  assert.equal((await PDFDocument.load(cover)).getPageCount(),1);
+ assert.ok(coverText.join(' ').includes(`dentro de ${modern?'treinta':'cuarenta'} años`));
  if(!modern)assert.equal(sha(JSON.stringify(manifest.layout)),'7f3e02233706bf3f1d67b8232c22d8f2bd8ec77ba60f190ab347bb4ab57c391c');
  assert.equal(manifest.layout.pages.flatMap(p=>p.lines.filter(l=>l.kind==='body').map(l=>l.text)).join(' '),
   row.manuscript.sections.flatMap(c=>c.paragraphs).join(' '));

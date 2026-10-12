@@ -86,6 +86,20 @@ test('planning never defaults silently to all five sizes in one request', async 
   await assert.rejects(fresh().planChapter(source, 0), /print_chapter_plan_scope/);
 });
 
+test('compact plans retain only bounded geometry and reconstruct the identical body layout', async () => {
+  const plans=[];
+  for(let chapter=0;chapter<5;chapter++)for(const size of [12,12.5,13,13.5,14]){
+    const plan=await fresh().planChapter(source,chapter,{size,compact:true});
+    assert.ok(JSON.stringify(plan).length<1500,'a plan must not duplicate the chapter prose');
+    assert.equal(plan.candidates[0].pages,undefined);
+    assert.ok(Number.isSafeInteger(plan.candidates[0].pageCount));
+    plans.push(plan);
+  }
+  const result=await fresh().composeLayout(source,plans,{proof:true,createdAt:(await manifestPromise).createdAt});
+  assert.deepEqual(result.layout,(await manifestPromise).layout);
+  assert.equal(result.layoutHash,(await manifestPromise).layoutHash);
+});
+
 test('JSON object order may change on persistence without changing source or plan identity', async () => {
   const reorder = value => Array.isArray(value) ? value.map(reorder) : value && typeof value === 'object'
     ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reorder(item)])) : value;

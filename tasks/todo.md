@@ -10,11 +10,11 @@
   - Aceptación: snapshot inmutable sin claves; bloquear contrato viejo/alterado antes de POST.
   - Verificar: test-caronte-engine/jobs; PostgreSQL real y relectura de objetivos.
   - Archivos: engine/jobs, migración aditiva y pruebas. Depende:A.
-- [ ] C Imprenta de 216–224 páginas.
+- [x] C Imprenta de 216–224 páginas.
   - Aceptación: texto completo, cinco capítulos, tipos legibles, lomo por páginas reales; v2 intacta.
   - Verificar: renderer/stages/engine; relectura independiente y renders.
   - Archivos: print/print-engine/runtime, integración y pruebas. Depende:A,B.
-- [ ] D Recibos Lulu seguros.
+- [x] D Recibos Lulu seguros.
   - Aceptación: ID válido durable; incompleto nunca listo; cero reenvío de intentos inciertos.
   - Verificar: test independiente preflight/route y operaciones reales aprobadas.
   - Archivos: print-preflight y sus pruebas. Depende: identidad de archivos y aprobación.

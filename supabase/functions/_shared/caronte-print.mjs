@@ -193,7 +193,8 @@ async function renderCover(source, geometry, proof, PDFDocument, fontkit, fontBy
   if (subtitleBottom < 110) fail('print_cover_subtitle_too_long');
   drawWrapped(page, `De mis ${source.future_age} años a mis ${source.current_age}.`, regular, 13,
     frontX, 90, safeWidth, 19, white);
-  const back = 'Un libro escrito por tu yo de dentro de cuarenta años. Una ficción personal sobre lo que aprendiste, lo que elegiste y lo que todavía puedes cambiar.';
+  const horizon=resolveLiteraryContract(source.prompt_version).horizonYears===30?'treinta':'cuarenta';
+  const back = `Un libro escrito por tu yo de dentro de ${horizon} años. Una ficción personal sobre lo que aprendiste, lo que elegiste y lo que todavía puedes cambiar.`;
   drawWrapped(page, back, regular, 16, backX, geometry.height - 170, safeWidth, 23, white);
   drawWrapped(page, proof ? 'PRUEBA TÉCNICA\nTexto sintético. No enviar a impresión.' :
     'Edición privada. Ficción futura basada en una entrevista personal. No es una predicción.', regular, 11,
@@ -230,6 +231,18 @@ const json = value => Array.isArray(value) ? `[${value.map(json).join(',')}]` :
   value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${json(value[key])}`).join(',')}}` : JSON.stringify(value);
 const jsonHash = value => sha256(new TextEncoder().encode(json(value)));
 const without = (value, key) => Object.fromEntries(Object.entries(value).filter(([name]) => name !== key));
+
+// Existing immutable full receipts can be consumed a few at a time. Validate
+// their original identity before discarding repeated prose. Never rewrite them.
+export async function compactPrintChapterPlan(plan) {
+  if(!plan || !Array.isArray(plan.candidates) || plan.candidates.length!==1 ||
+    plan.sha256!==await jsonHash(without(plan,'sha256')))fail('print_chapter_plan_corrupt');
+  if(plan.format==='chapter-counts-v1')return clone(plan);
+  if(plan.format!==undefined || !Array.isArray(plan.candidates[0].pages))fail('print_chapter_plan_corrupt');
+  const record={...without(plan,'sha256'),format:'chapter-counts-v1',
+    candidates:plan.candidates.map(({pages,...candidate})=>({...candidate,pageCount:pages.length}))};
+  return {...record,sha256:await jsonHash(record)};
+}
 
 // Stateless primitives for a private durable worker. This does not start a job,
 // expose a public endpoint or assert that the hosted runtime has been verified.
@@ -325,7 +338,8 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
       });
       const record = {template: PRINT_TEMPLATE, stagesVersion: STAGES_VERSION, sourceFingerprint: current.sourceFingerprint,
         fontFingerprint: current.fontFingerprint, chapterIndex, candidates};
-      return {...record, sha256: await jsonHash(record)};
+      const complete={...record,sha256:await jsonHash(record)};
+      return options.compact===true?compactPrintChapterPlan(complete):complete;
     },
     async composeLayout(manuscript, input, options = {}) {
       const current = await identity(manuscript), chapters = clone(input);
@@ -347,6 +361,40 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
         matrix.set(key, candidate);
       }
       if (matrix.size !== expected) fail('print_chapter_plans_required');
+      const compact=chapters.some(chapter=>chapter.format==='chapter-counts-v1');
+      if(chapters.some(chapter=>chapter.format!==undefined&&chapter.format!=='chapter-counts-v1'))fail('print_chapter_plan_corrupt');
+      if(compact){
+        const counts=sizes.map(size=>{
+          let count=4;
+          for(let chapterIndex=0;chapterIndex<5;chapterIndex++){
+            const candidate=matrix.get(`${chapterIndex}:${size}`),pages=candidate.pageCount??candidate.pages?.length;
+            if(!Number.isSafeInteger(pages)||pages<2||pages%2||candidate.leading!==size*1.4||
+              candidate.paragraphCount!==current.source.sections[chapterIndex].paragraphs.length)fail('print_chapter_plan_corrupt');
+            count+=pages;
+          }
+          return {size,count};
+        });
+        const policy=resolveLiteraryContract(current.source.prompt_version).physicalPages,target=policy.target??(policy.min+policy.max)/2;
+        const chosen=counts.filter(item=>item.count>=policy.min&&item.count<=policy.max)
+          .sort((a,b)=>Math.abs(a.count-target)-Math.abs(b.count-target))[0];
+        if(!chosen)fail('print_pagination_needs_revision');
+        const {embedded}=await document(current.source);
+        const widths=Object.fromEntries(Object.entries(embedded).map(([name,font])=>[name,measure(font)]));
+        const layout=planBook(current.source,chosen.size,chosen.size*1.4,widths);
+        if(layout.pages.length!==chosen.count)fail('print_chapter_plan_corrupt');
+        for(let index=0;index<5;index++){
+          const end=index===4?layout.pages.length+1:layout.chapterStarts[index+1].page;
+          const candidate=matrix.get(`${index}:${chosen.size}`);
+          if(end-layout.chapterStarts[index].page!==(candidate.pageCount??candidate.pages.length))fail('print_chapter_plan_corrupt');
+        }
+        const timestamp=options.createdAt??new Date().toISOString();
+        if(typeof timestamp!=='string'||!Number.isFinite(Date.parse(timestamp)))fail('print_job_timestamp_required');
+        const manifest={template:PRINT_TEMPLATE,stagesVersion:STAGES_VERSION,createdAt:new Date(timestamp).toISOString(),
+          sourceFingerprint:current.sourceFingerprint,fontFingerprint:current.fontFingerprint,wordCount:current.words,
+          proof:options.proof===true,layout,layoutHash:await jsonHash(layout)};
+        manifest.manifestHash=await jsonHash(manifest);
+        await validateManifest(current.source,manifest);return manifest;
+      }
       const candidates = sizes.map(size => {
         const pages = [{number: 1, kind: 'title', lines: []}, {number: 2, kind: 'edition', lines: []},
           {number: 3, kind: 'contents', lines: []}, {number: 4, kind: 'recto_blank', lines: []}];

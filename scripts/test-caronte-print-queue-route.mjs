@@ -84,7 +84,13 @@ function fixture({enabled=true,missingCredentials=false,degraded=false,claimFail
    return Response.json(job);
   }
   if(name==='future_book_print_steps'){
-   const key=url.searchParams.get('step_key');return Response.json(key?steps.filter(s=>`eq.${s.step_key}`===key):steps);
+   const key=url.searchParams.get('step_key');
+   let selected=key?.startsWith('eq.')?steps.filter(s=>`eq.${s.step_key}`===key):
+    key?.startsWith('in.(')?steps.filter(s=>key.slice(4,-1).split(',').includes(s.step_key)):steps;
+   if(url.searchParams.get('stage')==='neq.plan')selected=selected.filter(s=>s.stage!=='plan');
+   const fields=url.searchParams.get('select');
+   return Response.json(fields&&fields!=='*'?selected.map(s=>Object.fromEntries(fields.split(',').map(k=>
+    k==='plan_format:output->>format'?['plan_format',s.output?.format]:[k,s[k]]))):selected);
   }
   if(name==='future_book_pdfs')return Response.json(pdfs);
   assert.fail(`Unexpected synthetic HTTP path: ${url.pathname}`);
@@ -107,8 +113,8 @@ function fixture({enabled=true,missingCredentials=false,degraded=false,claimFail
   generate:extra=>dispatch({action:'generatePdf',...credentials,...extra}),status:extra=>dispatch({action:'getPdfStatus',...credentials,...extra}),
   async finishReceipt(){
    const interior={storage_verified:true,sha256:'b'.repeat(64),pageCount:194},cover={storage_verified:true,sha256:'c'.repeat(64)};
-   steps.push({step_key:'interior',status:'completed',output:interior,output_hash:await printJobFingerprint(interior)},
-    {step_key:'cover',status:'completed',output:cover,output_hash:await printJobFingerprint(cover)});
+   steps.push({step_key:'interior',stage:'interior',status:'completed',output:interior,output_hash:await printJobFingerprint(interior)},
+    {step_key:'cover',stage:'cover',status:'completed',output:cover,output_hash:await printJobFingerprint(cover)});
    const prefix=`${sid}/v01/${jid}`;
    pdfs.push({id:pid,print_job_id:jid,session_id:sid,manuscript_id:mid,version:1,status:'generated',review_status:'pending_review',
     storage_path:`${prefix}/interior.pdf`,page_count:194,print_validation:{source_sha256:job.source_sha256,interior_sha256:interior.sha256,cover_sha256:cover.sha256},

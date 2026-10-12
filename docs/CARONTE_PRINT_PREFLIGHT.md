@@ -24,6 +24,13 @@ trámite. La secuencia típica requiere cuatro llamadas: interior, consulta inte
 cubierta, consulta cubierta; puede requerir más consultas mientras Lulu procesa.
 
 Solo `NORMALIZED` sin errores en ambos archivos permite `ready_for_print=true`.
+La especificación oficial de Lulu define ese estado como normalización correcta y
+sus ejemplos usan `errors: null`. Se admite ese valor solo en una consulta GET del
+mismo ID ya conservado, con origen exacto y comprobaciones de páginas/producto.
+Un campo ausente o un `null` en el POST inicial permanece pendiente. Se conserva
+la representación real del proveedor; no se inventa una lista vacía de errores.
+Fuente: [contrato oficial de Lulu](https://api.lulu.com/api-docs/openapi-specs/openapi_public.yml),
+consultado el 12 de octubre de 2026. Ningún recibo incierto se vuelve a enviar.
 El interior debe confirmar el recuento exacto y el SKU admitido. `VALIDATED` es
 validación básica, no normalización completa. La cubierta no admite los estados
 `VALIDATING`/`VALIDATED`, exclusivos del interior según la documentación de Lulu.

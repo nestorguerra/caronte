@@ -405,7 +405,7 @@ export function buildStageRequest({ stage, interview, artifacts = {}, unit, draf
   // Sol's xhigh reasoning shares the output cap with prose. Reserve the official
   // initial 25k reasoning/output buffer without changing the 1800-2200-word gate.
   const legacyLimits={biography:14000,world:14000,outline:20000,draft:10000,review:6000,revision:10000,longitudinal:14000};
-  const currentLimits={...legacyLimits,biography:25000,world:25000,outline:25000,draft:25000,revision:25000};
+  const currentLimits={...legacyLimits,biography:25000,world:25000,outline:25000,draft:25000,revision:25000,review:16000,longitudinal:25000};
   const maxOutputTokens=(contract.version===LEGACY_CONTRACT.version?legacyLimits:currentLimits)[stage];
   return {
     system: contract.version===LEGACY_CONTRACT.version?SYSTEM:currentNarrativeSystem(),
