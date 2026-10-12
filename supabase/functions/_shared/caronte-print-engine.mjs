@@ -1,0 +1,234 @@
+import {countWords} from './caronte-literary.mjs';
+import {PRINT_TEMPLATE} from './caronte-print.mjs';
+
+export const PRINT_JOB_VERSION='caronte-a5-chunks-v1';
+const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const first=value=>Array.isArray(value)?value[0]||null:value||null;
+const fail=code=>{throw Object.assign(new Error(code),{code});};
+const encode=value=>encodeURIComponent(String(value));
+const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(',')}]`:value&&typeof value==='object'
+  ?`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`:JSON.stringify(value);
+export const printJobFingerprint=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',
+  new TextEncoder().encode(canonical(value)))),byte=>byte.toString(16).padStart(2,'0')).join('');
+const jsonOnly=value=>{const record={...value};delete record.bytes;return structuredClone(record);};
+const sizes=[12,12.5,13,13.5,14];
+const initial=Array.from({length:5},(_,index)=>sizes.map(size=>({key:`plan:${index}:${size}`,stage:'plan',index,size}))).flat();
+
+function schedule(completed){
+  for(const step of initial)if(!completed.has(step.key))return step;
+  if(!completed.has('compose'))return{key:'compose',stage:'compose'};
+  const manifest=completed.get('compose').output,count=manifest?.layout?.pages?.length;
+  if(!Number.isSafeInteger(count)||count<180||count>200||count%2||manifest.proof!==false)fail('print_layout_identity');
+  for(let firstPage=1;firstPage<=count;firstPage+=10){
+    const lastPage=Math.min(firstPage+9,count),key=`part:${firstPage}:${lastPage}`;
+    if(!completed.has(key))return{key,stage:'part',firstPage,lastPage};
+  }
+  for(const stage of ['interior','cover'])if(!completed.has(stage))return{key:stage,stage};
+  return{key:'finish',stage:'finish'};
+}
+function publicJob(job,steps){
+  const count=steps.filter(step=>step.status==='completed').length;
+  const pages=steps.find(step=>step.step_key==='compose'&&step.status==='completed')?.output?.layout?.pages?.length;
+  const total=25+1+Math.ceil((pages||200)/10)+2+1;
+  return{id:job.id,status:job.status,stage:job.stage,completedSteps:count,totalSteps:total,
+    progress:job.status==='ready'?100:Math.min(98,Math.floor(count/total*100)),
+    errorCode:job.error_code||null,createdAt:job.created_at,updatedAt:job.updated_at};
+}
+
+// Service-only coordinator. The HTTP boundary must authenticate, authorize and
+// gate activation. No recursive wake, paid model, order, payment or public URL.
+export function createPrintEngine({rest,stages,archive,settings,coverDimensions}){
+  const rpc=async(name,body)=>{
+    try{return await rest(`rpc/${name}`,{method:'POST',body});}
+    catch(error){
+      for(const code of ['lease_lost','active_print_source_changed','print_source_changed','print_manuscript_not_approved']){
+        if(String(error?.message||'').includes(code))fail(code);
+      }
+      fail('print_storage_unavailable');
+    }
+  };
+  const readJob=async(sessionId)=>first(await rest(`future_book_print_jobs?session_id=eq.${encode(sessionId)}&select=*&order=created_at.desc&limit=1`));
+  const readSteps=async(jobId)=>{
+    const rows=await rest(`future_book_print_steps?job_id=eq.${encode(jobId)}&select=*&order=created_at.asc,step_key.asc`);
+    if(!Array.isArray(rows))fail('print_storage_unavailable');return rows;
+  };
+  const readPdf=async(job)=>{
+    const pdf=first(await rest(`future_book_pdfs?id=eq.${encode(job.pdf_id)}&session_id=eq.${encode(job.session_id)}&select=*&limit=1`));
+    const steps=await readSteps(job.id);
+    const interior=steps.find(step=>step.step_key==='interior'&&step.status==='completed');
+    const cover=steps.find(step=>step.step_key==='cover'&&step.status==='completed');
+    if(!interior?.output?.storage_verified||!cover?.output?.storage_verified||
+        await printJobFingerprint(interior.output)!==interior.output_hash||
+        await printJobFingerprint(cover.output)!==cover.output_hash)fail('print_bundle_persistence_unverified');
+    if(!pdf||pdf.id!==job.pdf_id||pdf.session_id!==job.session_id||pdf.manuscript_id!==job.manuscript_id||
+        pdf.version!==job.version||pdf.storage_path!==archive.path(job,'interior')||
+        pdf.print_job_id!==job.id||pdf.metadata?.print_job_id!==job.id||pdf.print_validation?.source_sha256!==job.source_sha256||
+        pdf.page_count!==interior.output.pageCount||pdf.print_validation?.interior_sha256!==interior.output.sha256||
+        pdf.print_validation?.cover_sha256!==cover.output.sha256||pdf.lulu_metadata?.interior_sha256!==interior.output.sha256||
+        pdf.lulu_metadata?.cover_sha256!==cover.output.sha256||pdf.lulu_metadata?.interior_pdf_storage_path!==archive.path(job,'interior')||
+        pdf.lulu_metadata?.cover_pdf_storage_path!==archive.path(job,'cover')||pdf.lulu_metadata?.environment!==job.lulu_environment||
+        pdf.lulu_metadata?.pod_package_id!==job.pod_package_id)fail('print_bundle_persistence_unverified');
+    return pdf;
+  };
+  async function status(sessionId){
+    if(!uuid.test(sessionId))fail('print_job_scope');
+    const job=await readJob(sessionId);if(!job)return{job:null,pdf:null};
+    const steps=await readSteps(job.id),pdf=job.status==='ready'?await readPdf(job):null;
+    return{job:publicJob(job,steps),pdf};
+  }
+  async function enqueue(sessionId,row){
+    if(!uuid.test(sessionId)||!uuid.test(row?.id)||row.session_id!==sessionId)fail('print_job_scope');
+    const source=structuredClone(row.manuscript);
+    if(row.status!=='ready'||row.provider_chain?.degraded===true||['deterministic','openai_failed'].includes(row.provider_chain?.drafting)||
+        ['degraded_provider_fallback','blocked_safety','needs_caronte_rewrite'].includes(row.quality_report?.status)||row.quality_report?.editorial_gate!=='pass'||
+        source?.prompt_version!=='caronte-literary-v2'||!Array.isArray(source.sections)||source.sections.length!==5||
+        !row.updated_at||!Number.isFinite(Date.parse(row.updated_at)))fail('print_manuscript_not_approved');
+    const words=countWords(source.sections.flatMap(chapter=>chapter.paragraphs||[]).join(' '));
+    if(words<45000||words>55000)fail('print_manuscript_word_count');
+    const config=await settings();
+    if(!['sandbox','production'].includes(config?.environment)||!/^[a-f0-9]{64}$/.test(config.configurationTag)||
+        typeof config.podPackageId!=='string'||!config.podPackageId)fail('print_lulu_credentials_required');
+    const sourceHash=await printJobFingerprint(source);
+    const inputHash=await printJobFingerprint({sourceHash,manuscriptId:row.id,revision:row.updated_at,version:PRINT_JOB_VERSION,config});
+    const job=first(await rpc('caronte_enqueue_print',{p_session_id:sessionId,p_manuscript_id:row.id,
+      p_manuscript_revision:row.updated_at,p_source:source,p_source_sha256:sourceHash,p_input_hash:inputHash,
+      p_stages_version:PRINT_JOB_VERSION,p_environment:config.environment,p_configuration_tag:config.configurationTag,
+      p_pod_package_id:config.podPackageId}));
+    if(!job?.id)fail('print_enqueue_unverified');
+    // Lost enqueue acceptance can be resolved by status; never reserve an ID or
+    // version in memory or retry with a new identity.
+    const result=await status(sessionId);
+    if(result.job?.id!==job.id)fail('print_enqueue_unverified');return result;
+  }
+  async function advance(jobId=null){
+    if(jobId!==null&&!uuid.test(jobId))fail('print_job_scope');
+    const claimed=first(await rpc('caronte_claim_print_job',{p_job_id:jobId}));
+    if(!claimed?.id)return{status:'idle'};
+    const job=structuredClone(claimed),steps=structuredClone(await readSteps(job.id));
+    let step;
+    const checkpoint=async(record,state,delay=0)=>{
+      if(await rpc('caronte_checkpoint_print_job',{
+        p_job_id:job.id,p_lease_token:job.lease_token,p_step:record,p_state:state,p_delay_seconds:delay})!==true)fail('print_storage_unavailable');
+      try{
+        const observed=first(await rest(`future_book_print_steps?job_id=eq.${encode(job.id)}&step_key=eq.${encode(record.step_key)}&select=*&limit=1`));
+        if(!observed||['step_key','stage','status','attempt','input_hash','output','output_hash','error_code']
+          .some(key=>canonical(observed[key]??null)!==canonical(record[key]??null)))fail('print_storage_unavailable');
+        const owner=await readJob(job.session_id);
+        if(owner?.id!==job.id||owner.status!==state||(state==='running'&&owner.lease_token!==job.lease_token))fail('print_storage_unavailable');
+      }catch{fail('print_storage_unavailable');}
+    };
+    try{
+      if(!uuid.test(job.id)||!uuid.test(job.pdf_id)||!uuid.test(job.session_id)||!uuid.test(job.manuscript_id)||
+          !Number.isSafeInteger(job.version)||job.version<1||job.stages_version!==PRINT_JOB_VERSION||
+          await printJobFingerprint(job.source_snapshot)!==job.source_sha256||!Number.isFinite(Date.parse(job.created_at)))fail('print_job_identity');
+      const completed=new Map();
+      for(const record of steps){
+        if(record.output&&await printJobFingerprint(record.output)!==record.output_hash)fail('print_step_receipt_corrupt');
+        if(record.status==='completed'){
+          if(completed.has(record.step_key)||!record.output)fail('print_step_receipt_corrupt');
+          completed.set(record.step_key,record);
+        }
+      }
+      const next=schedule(completed),previous=steps.find(record=>record.step_key===next.key);
+      const inputHash=await printJobFingerprint({jobId:job.id,pdfId:job.pdf_id,version:job.version,
+        source:job.source_sha256,identity:job.input_hash,createdAt:new Date(job.created_at).toISOString(),stage:next,
+        receipts:[...completed].sort(([a],[b])=>a.localeCompare(b)).map(([key,value])=>[key,value.output_hash])});
+      if(previous?.input_hash&&previous.input_hash!==inputHash)fail('print_step_input_changed');
+      step={step_key:next.key,stage:next.stage,status:'started',attempt:previous?.attempt||0,input_hash:inputHash,
+        output:previous?.output||null,output_hash:previous?.output_hash||null};
+      const source=job.source_snapshot,manifest=completed.get('compose')?.output;
+      const load=async(key)=>{
+        const receipt=completed.get(key)?.output;
+        if(!receipt?.storage_verified)fail('print_step_receipt_corrupt');
+        const record=await archive.read(job,key,receipt);if(!record)fail('print_archive_unverified');
+        return{...receipt,bytes:record.bytes};
+      };
+      // Count the claim before any recovery read, render or final verification.
+      // A read-only retry must not bypass the durable attempt budget.
+      if(step.attempt>=3)fail('print_retry_limit');
+      step.attempt++;await checkpoint(step,'running');
+      if(next.stage==='finish'){
+        const interior=await load('interior'),cover=await load('cover');
+        const validation={template:PRINT_TEMPLATE,ready_for_print:false,status:'pending_external_preflight',
+          page_count:interior.pageCount,fonts_embedded:true,separate_cover:true,human_editorial_review:'pending',
+          lulu_interior_preflight:'pending',lulu_cover_preflight:'pending',source_sha256:job.source_sha256,
+          interior_sha256:interior.sha256,cover_sha256:cover.sha256};
+        const pdf={id:job.pdf_id,print_job_id:job.id,session_id:job.session_id,manuscript_id:job.manuscript_id,version:job.version,
+          status:'generated',review_status:'pending_review',file_name:`caronte-${job.session_id}-v${String(job.version).padStart(2,'0')}.pdf`,
+          mime_type:'application/pdf',pdf_base64:null,page_size:'A5',page_count:interior.pageCount,storage_path:interior.path,
+          print_validation:validation,lulu_metadata:{ready_for_print:false,ready_for_print_status:'pending_external_preflight',send_to_lulu:false,
+            title:source.title,language:'es',trim_size:'A5',trim_width_points:interior.width,trim_height_points:interior.height,
+            pod_package_id:job.pod_package_id,environment:job.lulu_environment,interior_pdf_storage_path:interior.path,
+            cover_pdf_storage_path:cover.path,cover_status:'separate_full_spread_pending_preflight',cover_dimensions:cover.dimensions,
+            interior_sha256:interior.sha256,cover_sha256:cover.sha256},
+          quality_report:{...validation,word_count:manifest.wordCount,paragraph_count:interior.paragraphCount,
+            byte_size:interior.byteSize,cover_byte_size:cover.byteSize,font_size:manifest.layout.size,
+            leading:manifest.layout.leading,margins:manifest.layout.margins,chapter_starts:manifest.layout.chapterStarts},
+          metadata:{template:PRINT_TEMPLATE,storage_mode:'private_storage_primary',artifact_id:job.id,print_job_id:job.id,
+            storage_verified:true,lulu_dimensions_called:true,lulu_preflight_called:false,lulu_order_created:false,
+            lulu_credential_tag:job.lulu_configuration_tag}};
+        try{if(await rpc('caronte_finish_print_job',{p_job_id:job.id,p_lease_token:job.lease_token,p_pdf:pdf})!==job.pdf_id)fail('print_storage_unavailable');}
+        catch(error){
+          if(error.code==='lease_lost')throw error;
+          const observed=await readJob(job.session_id);
+          if(observed?.id!==job.id||observed.status!=='ready')throw error;
+        }
+        const observed=await readJob(job.session_id);
+        if(observed?.id!==job.id||observed.status!=='ready')fail('print_bundle_persistence_unverified');
+        await readPdf(observed);return{status:'ready',jobId:job.id,pdfId:job.pdf_id};
+      }
+      const binary=['part','interior','cover'].includes(next.stage);
+      if(binary&&step.output){
+        const recovered=await archive.read(job,next.key,step.output);
+        if(recovered){
+          const output={...step.output,storage_verified:true};
+          await checkpoint({...step,status:'completed',output,output_hash:await printJobFingerprint(output)},'queued');
+          return{status:'queued',jobId:job.id};
+        }
+      }
+      let output;
+      if(next.stage==='plan')output=await stages.planChapter(source,next.index,{size:next.size});
+      else if(next.stage==='compose')output=await stages.composeLayout(source,initial.map(value=>completed.get(value.key).output),
+        {createdAt:new Date(job.created_at).toISOString(),proof:false});
+      else if(next.stage==='part')output=await stages.renderInteriorPart(source,manifest,next);
+      else if(next.stage==='interior'){
+        const parts=[];
+        for(let firstPage=1;firstPage<=manifest.layout.pages.length;firstPage+=10){
+          parts.push(await load(`part:${firstPage}:${Math.min(firstPage+9,manifest.layout.pages.length)}`));
+        }
+        output=await stages.mergeInterior(source,manifest,parts);
+      }else if(next.stage==='cover'){
+        const current=await settings();
+        if(current.environment!==job.lulu_environment||current.configurationTag!==job.lulu_configuration_tag||
+            current.podPackageId!==job.pod_package_id)fail('print_lulu_configuration_changed');
+        output=await stages.renderCover(source,manifest,await load('interior'),{coverDimensions:async count=>{
+          const dimensions=await coverDimensions(job,count);
+          if(dimensions.environment!==job.lulu_environment||dimensions.podPackageId!==job.pod_package_id||
+              dimensions.pageCount!==count||dimensions.source!=='lulu-api')fail('print_lulu_dimensions_mismatch');
+          return dimensions;
+        }});
+      }
+      if(!output||output.sourceFingerprint!==job.source_sha256)fail('print_step_source_changed');
+      let receipt=jsonOnly(output);
+      if(binary){
+        receipt.path=archive.path(job,next.key);
+        if(step.output&&canonical(receipt)!==canonical(step.output))fail('print_step_output_changed');
+        step={...step,output:receipt,output_hash:await printJobFingerprint(receipt)};
+        await checkpoint(step,'running'); // Reserved bytes before external write.
+        const saved=await archive.write(job,next.key,output);
+        if(!saved.verified||saved.path!==receipt.path||saved.sha256!==receipt.sha256||saved.byteSize!==receipt.byteSize)fail('print_archive_unverified');
+        receipt={...receipt,storage_verified:true};
+      }
+      await checkpoint({...step,status:'completed',output:receipt,output_hash:await printJobFingerprint(receipt)},'queued');
+      return{status:'queued',jobId:job.id};
+    }catch(error){
+      if(['lease_lost','print_storage_unavailable'].includes(error?.code))throw error;
+      const code=/^print_[a-z_]{1,70}$/.test(error?.code||error?.message||'')?(error.code||error.message):'print_step_failed';
+      const retry=['print_archive_unverified','print_archive_timeout'].includes(code)&&(step?.attempt||0)<3;
+      await checkpoint({...step,step_key:step?.step_key||'gate',stage:step?.stage||'gate',status:'failed',
+        attempt:step?.attempt||0,error_code:code},retry?'queued':'blocked',retry?10:0);
+      return{status:retry?'queued':'blocked',jobId:job.id,errorCode:code};
+    }
+  }
+  return Object.freeze({enqueue,status,advance});
+}

@@ -10,6 +10,7 @@ const requiredFiles = [
   'src/auth/confirm.html',
   'src/scripts/api-client.js',
   'src/scripts/future-book.js',
+  'src/scripts/caronte-capture-store.js',
   'src/scripts/future-admin.js',
   'src/scripts/auth-confirm.js',
   'src/scripts/auth-flow.js',

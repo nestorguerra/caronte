@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import assert from 'node:assert/strict';
 
 const root = process.cwd();
 
@@ -55,9 +56,17 @@ includes(adminJs, [
   'adminApprovePdf',
   'adminRegeneratePdf',
   'adminReleasePdf',
-  'localAdminAction',
-  'providerDefaults'
+  'backend_not_configured',
+  'renderBookJobs',
+  'adminBookJob'
 ], 'Future book Sprint 5 admin JS');
+
+// The production panel must never replace backend/auth failures with fake data.
+// The VM tests in test-caronte-admin.mjs exercise the authentication and actions.
+for (const removedFallback of ['localAdminAction', 'demoDashboard', 'localDashboard']) {
+  assert.equal(adminJs.includes(removedFallback), false,
+    `Production admin must not contain ${removedFallback}`);
+}
 
 includes(adminCss, [
   '.metrics-grid',

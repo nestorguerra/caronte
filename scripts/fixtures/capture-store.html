@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es"><meta charset="utf-8"><title>Prueba privada de almacenamiento Caronte</title>
+<style>body{max-width:1200px}pre{white-space:pre-wrap}</style>
+<body><h1>Almacenamiento de audio · comprobación privada</h1>
+<p>Solo datos sintéticos en este navegador. Sin micrófono ni conexión a proveedores.</p>
+<button id="write">Guardar audio de prueba</button><button id="read">Verificar después de recargar</button>
+<pre id="result" role="status">Listo</pre>
+<script type="module">
+const result=document.querySelector('#result');
+try {
+  const {createCaptureStore,validateCaptureReceipt}=await import('./caronte-capture-store.js');
+  const store=createCaptureStore({dbName:'caronte-capture-synthetic-verification'});
+  const sessionId='synthetic-session';
+  document.querySelector('#write').onclick=async()=>{
+    try {
+      const size=6*1024*1024;const bytes=new Uint8Array(size);bytes[0]=73;bytes[size-1]=91;
+      await store.put({sessionId,captureId:crypto.randomUUID(),questionIndex:1,transcript:'Respuesta sintética íntegra',transcriptSource:'browser',transcriptionFinal:true,audioCaptured:true,audioBlob:new Blob([bytes],{type:'audio/webm'})});
+      result.textContent='GUARDADO CONFIRMADO: 6291456 bytes. Recargue y verifique.';
+    } catch(error){result.textContent='ERROR: '+error.message;}
+  };
+  document.querySelector('#read').onclick=async()=>{
+    try {
+      const [saved]=await store.list(sessionId);
+      if(!saved||saved.transcript!=='Respuesta sintética íntegra'||saved.audioBlob.size!==6291456) throw new Error('capture_missing_or_truncated');
+      const bytes=new Uint8Array(await saved.audioBlob.arrayBuffer());
+      if(bytes[0]!==73||bytes[bytes.length-1]!==91) throw new Error('audio_changed');
+      const original=new Uint8Array(6291456);original[0]=73;original[original.length-1]=91;
+      const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',original));
+      const hash=[...digest].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+      const captureId=saved.captureId;
+      const receipt={ok:true,saved:true,session:{id:sessionId},answer:{id:'synthetic-answer',session_id:sessionId,question_index:1,
+        transcript:saved.transcript,transcript_source:'browser',audio_storage_path:`${sessionId}/q01-${captureId}.webm`,
+        metadata:{capture_id:captureId,transcription_final:true,answer_state:'complete',audio_storage_status:'stored_private',audio_storage_verified:true,audio_bytes:6291456,audio_sha256:'0'.repeat(64)}}};
+      let rejected=false;
+      try { if(await validateCaptureReceipt(receipt,saved)) await store.acknowledge(sessionId,captureId); }
+      catch(error){if(error.message!=='answer_receipt_audio_archive_mismatch') throw error;rejected=true;}
+      if(!rejected||(await store.list(sessionId)).length!==1) throw new Error('unverified_audio_was_removed');
+      receipt.answer.metadata.audio_sha256=hash;
+      if(!await validateCaptureReceipt(receipt,saved)) throw new Error('verified_receipt_not_accepted');
+      await store.put({...saved,sessionId:'synthetic-other-session'});
+      await store.acknowledge(sessionId,captureId);
+      await store.put(saved);
+      if((await store.list(sessionId)).length!==0||(await store.list('synthetic-other-session')).length!==1) throw new Error('session_isolation_failed');
+      await store.acknowledge('synthetic-other-session',captureId);
+      result.textContent='VERIFICADO: 6 MiB íntegros tras recargar. Audio retenido ante un recibo incorrecto; retirado solo tras verificar todos los bytes. Sesiones aisladas y migración sin reenvío. Solo datos sintéticos.';
+    } catch(error){result.textContent='ERROR: '+error.message;}
+  };
+} catch(error){result.textContent='ERROR: '+error.message;}
+</script></body></html>

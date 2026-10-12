@@ -36,6 +36,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Install pinned PDF dependencies
+        run: npx --yes pnpm@11.25.0 install --frozen-lockfile --ignore-scripts
+
       - name: Validate Sprint 1 source
         run: npm run validate
 

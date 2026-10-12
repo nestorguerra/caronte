@@ -1,0 +1,42 @@
+name: Caronte Print Queue Recovery
+
+on:
+  schedule:
+    - cron: '3-59/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: caronte-print-recovery
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  recover:
+    # Prepared locally, not activated. Manual dispatch obeys the same gates.
+    if: ${{ vars.CARONTE_PRINT_RECOVERY_ENABLED == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    environment: caronte-book-operations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout approved default branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup existing Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Advance bounded independent print steps
+        run: node scripts/wake-caronte-print-queue.mjs
+        env:
+          CARONTE_PRINT_RECOVERY_ENABLED: ${{ vars.CARONTE_PRINT_RECOVERY_ENABLED }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          FUNCTIONS_BASE_URL: ${{ vars.FUNCTIONS_BASE_URL }}
+          FUTURE_BOOK_MONITOR_SECRET: ${{ secrets.FUTURE_BOOK_MONITOR_SECRET }}

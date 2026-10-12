@@ -32,14 +32,19 @@ includes(fn, [
   'buildNarrativeOutline',
   'evaluateCaronteManuscript',
   'prohibitedPromiseViolations',
-  'caronte_rewrite_requested',
+  'createBookEngine',
   'future_book_psych_maps',
   'psych_map_id',
   'needs_caronte_rewrite',
   'blocked_safety',
   'ready_for_print',
-  'reviewWithAnthropic(ai.manuscript, psychological.map, caronteEvaluation)'
+  'engine.enqueue(row, await readAnswers(String(row.id)))'
 ], 'Future book Sprint 9 backend');
+
+// The synchronous v1 rewrite path is superseded by the durable reviewed engine.
+// Its behavior is covered by test-caronte-literary/jobs/engine, not event names.
+const literary = await file('supabase/functions/_shared/caronte-literary.mjs');
+includes(literary, ['buildStageRequest', 'validateArtifact', 'revision', 'longitudinal', 'approvalBindings'], 'Durable Caronte editorial contract');
 
 includes(migration, [
   'create table if not exists public.future_book_psych_maps',

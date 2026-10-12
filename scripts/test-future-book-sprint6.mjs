@@ -120,7 +120,7 @@ includes(bookJs, [
 ], 'Future book Sprint 6 client JS');
 
 includes(adminJs, [
-  'adminMonitor',
+  'renderMonitor(data.monitor)',
   'adminToggleAccess',
   'adminDeleteSessionData',
   'renderMonitor'

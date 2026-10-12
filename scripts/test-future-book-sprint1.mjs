@@ -39,6 +39,7 @@ const runtime = vm.createContext({
   saveSession: () => {}, localSession: () => ({}),
   setText: () => {}, note: () => {}, sessionStatus: {}, enteredName: '',
   ENTRY_REQUEST_TIMEOUT_MS: 12000, ACTION_REQUEST_TIMEOUT_MS: 30000,
+  ANSWER_SAVE_TIMEOUT_MS: 180000,
   INTRO_AUDIO_TIMEOUT_MS: 200000
 });
 vm.runInContext(actionSource, runtime);
@@ -47,6 +48,8 @@ runtime.callFunction = async (_name, _payload, options) => options;
 assert.equal((await runtime.futureAction('synthesizeQuestion', { questionIndex: 0 })).timeoutMs, 200000);
 assert.equal((await runtime.futureAction('synthesizeQuestion', { questionIndex: 1 })).timeoutMs, 75000);
 assert.equal((await runtime.futureAction('startInterview')).timeoutMs, 12000);
+assert.equal((await runtime.futureAction('saveAnswer')).timeoutMs, 180000);
+assert.equal((await runtime.futureAction('getSession')).timeoutMs, 30000);
 runtime.currentSession.mode = 'local';
 await assert.rejects(runtime.futureAction('synthesizeQuestion'), /session_recovery_required/);
 

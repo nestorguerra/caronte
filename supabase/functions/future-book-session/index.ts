@@ -1,6 +1,17 @@
 import { jsonResponse } from '../_shared/cors.ts';
 import { callOpenAiJson } from '../_shared/ai.ts';
-import { clientIp, encodeParam, getUser, hasServiceConfig, rest, userAgent } from '../_shared/service.ts';
+import { clientIp, encodeParam, getUser, hasServiceConfig, rest, userAgent, serviceRoleKey, supabaseUrl } from '../_shared/service.ts';
+import { createBookEngine } from '../_shared/caronte-engine.mjs';
+import { renderPrintBundle, loadPrintStages } from '../_shared/caronte-print-runtime.mjs';
+import { createPrintArchive, createPrintFileAccess, createPrintStageArchive } from '../_shared/caronte-print-storage.mjs';
+import { createPrintEngine } from '../_shared/caronte-print-engine.mjs';
+import { createPrintPreflight, printArtifactBinding } from '../_shared/caronte-print-preflight.mjs';
+import { createPrintQuotation } from '../_shared/caronte-print-quote.mjs';
+import { createPrintOrder } from '../_shared/caronte-print-order.mjs';
+import { createLuluPrintClient, LULU_A5_PAPERBACK_SKU } from '../_shared/lulu-print.mjs';
+import { createLuluCredentialStore } from '../_shared/caronte-lulu-credentials.mjs';
+
+declare const EdgeRuntime: { waitUntil(task: Promise<unknown>): void };
 
 function first<T>(value: T[] | T | null): T | null {
   return Array.isArray(value) ? (value[0] || null) : value;
@@ -30,6 +41,13 @@ function safeInt(value: unknown, fallback: number, min: number, max: number) {
 function safeLongText(value: unknown, fallback = '', limit = 12000) {
   const text = String(value || fallback).trim();
   return text.slice(0, limit);
+}
+
+function completeAnswerTranscript(value: unknown) {
+  if (value == null) return '';
+  if (typeof value !== 'string') throw new Error('transcript_invalid');
+  if (value.length > 200000) throw new Error('transcript_too_large');
+  return value.trim();
 }
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number) {
@@ -1209,7 +1227,7 @@ function answerAudioInput(payload: Record<string, unknown>) {
   }
 }
 
-async function uploadPrivateAudioArtifact(sessionId: string, questionIndex: number, mimeType: string, bytes: Uint8Array) {
+async function uploadPrivateAudioArtifact(sessionId: string, questionIndex: number, mimeType: string, bytes: Uint8Array, captureId = '') {
   if (!storeAudioEnabled()) {
     return { status: 'discarded_by_policy', path: null as string | null };
   }
@@ -1220,23 +1238,69 @@ async function uploadPrivateAudioArtifact(sessionId: string, questionIndex: numb
   }
 
   const extension = audioExtension(mimeType);
-  const path = `${sessionId}/q${String(questionIndex).padStart(2, '0')}-${Date.now()}.${extension}`;
-  const response = await fetch(`${supabaseUrl}/storage/v1/object/${futureBookAudioBucket}/${path}`, {
-    method: 'PUT',
+  const path = `${sessionId}/q${String(questionIndex).padStart(2, '0')}-${captureId || Date.now()}.${extension}`;
+  const response = await fetchWithTimeout(`${supabaseUrl}/storage/v1/object/${futureBookAudioBucket}/${path}`, {
+    method: 'POST',
     headers: {
       apikey: serviceRoleKey,
       Authorization: `Bearer ${serviceRoleKey}`,
       'Content-Type': mimeType,
       'Cache-Control': 'private, max-age=0',
-      'x-upsert': 'true'
+      'x-upsert': 'false'
     },
     body: bytes
-  }).catch(() => null);
+  }, 20000).catch(() => null);
 
-  if (!response?.ok) {
-    return { status: response ? `storage_http_${response.status}` : 'storage_fetch_failed', path: null as string | null };
+  if (response && !response.ok && ![400, 409].includes(response.status)) {
+    return { status: `storage_http_${response.status}`, path: null as string | null };
   }
-  return { status: 'stored_private', path };
+  // Existing immutable objects and lost upload responses are reconciled by
+  // reading the private bytes, never by overwriting or trusting a 2xx alone.
+  return await verifyPrivateAudioArtifact(path, bytes);
+}
+
+async function audioSha256(bytes: Uint8Array) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyPrivateAudioArtifact(path: string, expected: Uint8Array) {
+  const failed = (status: string) => ({ status, path: null as string | null, sha256: null as string | null, byteLength: 0 });
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+  if (!supabaseUrl || !serviceRoleKey) return failed('storage_not_configured');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const objectPath = path.split('/').map(encodeURIComponent).join('/');
+    const response = await fetch(`${supabaseUrl}/storage/v1/object/${futureBookAudioBucket}/${objectPath}`, {
+      method: 'GET', signal: controller.signal,
+      headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, 'Cache-Control': 'no-cache' }
+    });
+    if (!response.ok) return failed(`audio_readback_http_${response.status}`);
+    const reader = response.body?.getReader();
+    if (!reader) return failed('audio_readback_empty');
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > expected.byteLength) { await reader.cancel(); return failed('audio_readback_mismatch'); }
+      chunks.push(value);
+    }
+    if (length !== expected.byteLength) return failed('audio_readback_mismatch');
+    const actual = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) { actual.set(chunk, offset); offset += chunk.byteLength; }
+    const sha256 = await audioSha256(actual);
+    if (sha256 !== await audioSha256(expected)) return failed('audio_readback_mismatch');
+    return { status: 'stored_private', path, sha256, byteLength: length };
+  } catch {
+    return failed('audio_readback_failed');
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function transcriptionApiKey() {
@@ -1258,6 +1322,63 @@ function narrativeDensityScore(text: string) {
   const concreteScore = Math.min(0.35, concreteSignals * 0.05);
   const firstPersonScore = Math.min(0.2, firstPersonSignals * 0.025);
   return Number((lengthScore + concreteScore + firstPersonScore).toFixed(2));
+}
+
+async function requestAnswerTranscription(form: FormData, apiKey: string) {
+  const controller = new AbortController();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const cancelBody = () => { void reader?.cancel().catch(() => null); };
+  controller.signal.addEventListener('abort', cancelBody, { once: true });
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error('transcription_timeout'));
+      controller.abort();
+    }, 60000);
+  });
+  try {
+    return await Promise.race([deadline, (async () => {
+      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
+        signal: controller.signal, redirect: 'error'
+      });
+      if (controller.signal.aborted || !response.ok) {
+        void response.body?.cancel().catch(() => null);
+        if (controller.signal.aborted) throw new Error('transcription_timeout');
+        return { ok: false, status: response.status, text: '' };
+      }
+      reader = response.body?.getReader();
+      const chunks: string[] = [], decoder = new TextDecoder('utf-8', { fatal: true });
+      let byteLength = 0;
+      try {
+        while (reader) {
+          const { done, value } = await reader.read();
+          if (controller.signal.aborted) throw new Error('transcription_timeout');
+          if (done) break;
+          byteLength += value.byteLength;
+          // Supports the full 200,000-character transcript, including JSON
+          // Unicode escapes. Reject larger envelopes; never truncate them.
+          if (byteLength > 2 * 1024 * 1024) throw new Error('transcription_response_too_large');
+          chunks.push(decoder.decode(value, { stream: true }));
+        }
+        chunks.push(decoder.decode());
+        return { ok: true, status: response.status, text: chunks.join('') };
+      } finally {
+        cancelBody();
+        reader?.releaseLock();
+        reader = undefined;
+      }
+    })()]);
+  } catch (error) {
+    const code = controller.signal.aborted ? 'transcription_timeout'
+      : error instanceof Error && error.message === 'transcription_response_too_large'
+        ? 'transcription_response_too_large' : 'transcription_transport_failed';
+    throw new Error(code);
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+    controller.signal.removeEventListener('abort', cancelBody);
+  }
 }
 
 async function transcribeAnswerAudio(input: {
@@ -1296,20 +1417,24 @@ async function transcribeAnswerAudio(input: {
   form.append('prompt', `Transcribe una respuesta en espanol para una entrevista literaria privada. Pregunta: ${safeLongText(input.questionText, '', 500)}`);
 
   const startedAt = Date.now();
-  const response = await fetchWithTimeout('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form
-  }, 60000).catch((error) => ({ ok: false, status: 0, text: async () => String(error?.message || 'fetch_failed') }) as Response);
+  let response: { ok: boolean; status: number; text: string };
+  try {
+    response = await requestAnswerTranscription(form, apiKey);
+  } catch (error) {
+    const status = error instanceof Error ? error.message : 'transcription_transport_failed';
+    await insertEvent(input.sessionId, 'answer_transcription_failed', {
+      question_index: input.questionIndex, provider: 'openai', model, status, sprint: 8
+    }).catch(() => null);
+    return { ok: false, transcript: '', status, provider: 'openai', model };
+  }
 
-  const text = await response.text();
+  const text = response.text;
   if (!response.ok) {
     await insertEvent(input.sessionId, 'answer_transcription_failed', {
       question_index: input.questionIndex,
       provider: 'openai',
       model,
       status: response.status,
-      detail: safeLongText(text, '', 500),
       sprint: 8
     }).catch(() => null);
     return { ok: false, transcript: '', status: `openai_http_${response.status}`, provider: 'openai', model };
@@ -1321,7 +1446,12 @@ async function transcribeAnswerAudio(input: {
   } catch {
     parsed = null;
   }
-  const transcript = safeLongText(parsed?.text || text, '', 12000);
+  let transcript = '';
+  try {
+    transcript = parsed && typeof parsed.text === 'string' ? completeAnswerTranscript(parsed.text) : '';
+  } catch {
+    // Never persist arbitrary provider bodies or truncate a long transcription.
+  }
   if (!transcript) {
     await insertEvent(input.sessionId, 'answer_transcription_failed', {
       question_index: input.questionIndex,
@@ -1405,6 +1535,14 @@ function buildPdfDocument(manuscriptPayload: Record<string, unknown>, sessionId:
   const sections = Array.isArray(manuscript.sections)
     ? manuscript.sections as Array<Record<string, unknown>>
     : [];
+  // This legacy preview strips Unicode and adds blank notes. Never route the
+  // full 180-200-page product through it while the print renderer is pending.
+  const actualWords = sections.reduce((sum, section) => sum + wordCount(
+    Array.isArray(section.paragraphs) ? section.paragraphs.join('\n\n') : ''), 0);
+  const targetPages = manuscript.target_pages as Record<string, unknown> | undefined;
+  if (actualWords >= 45000 || Number(manuscript.word_count) >= 45000 || Number(targetPages?.min) >= 180) {
+    throw new Error('print_renderer_required');
+  }
   const title = pdfText(manuscript.title || manuscriptPayload.title || 'Futuro Anterior', 180) || 'Futuro Anterior';
   const subtitle = pdfText(manuscript.subtitle || 'Un libro desde futuros plausibles.', 180);
   const pageWidth = 420;
@@ -1689,8 +1827,23 @@ function validateEditorialPdf(pdf: Record<string, unknown>, degraded: boolean, s
     },
     {
       code: 'page_count',
-      status: pageCount >= 32 && pageCount <= 80 ? 'pass' : 'warning',
-      detail: `Paginas generadas: ${pageCount}. Objetivo interior: 32-80 para beta de imprenta.`
+      status: pageCount >= 180 && pageCount <= 200 ? 'pass' : 'fail',
+      detail: `Paginas generadas: ${pageCount}. Objetivo interior: 180-200 paginas fisicas.`
+    },
+    {
+      code: 'fonts_embedded',
+      status: 'fail',
+      detail: 'El generador de vista previa usa fuentes base no incrustadas; no es un interior de imprenta.'
+    },
+    {
+      code: 'separate_cover',
+      status: 'fail',
+      detail: 'Falta el PDF independiente de contracubierta, lomo y portada con sus dimensiones verificadas.'
+    },
+    {
+      code: 'lulu_preflight',
+      status: 'fail',
+      detail: 'No existe validacion ni normalizacion confirmada de ambos archivos por Lulu.'
     },
     {
       code: 'file_size',
@@ -1722,10 +1875,13 @@ async function publicPdfWithBinary(row: Record<string, unknown> | null) {
   const storedBase64 = safeLongText(row.pdf_base64, '', 20_000_000);
   const storageBase64 = storedBase64 || await loadPrivatePdfBase64(row.storage_path);
   const signedUrl = await signedPrivatePdfUrl(row.storage_path);
+  const lulu = row.lulu_metadata as Record<string, unknown> | undefined;
+  const coverSignedUrl = await signedPrivatePdfUrl(lulu?.cover_pdf_storage_path);
   return {
     ...payload,
     ...(storageBase64 ? { pdfBase64: storageBase64 } : {}),
-    ...(signedUrl ? { signedUrl } : {})
+    ...(signedUrl ? { signedUrl } : {}),
+    ...(coverSignedUrl ? { coverSignedUrl } : {})
   };
 }
 
@@ -1757,6 +1913,12 @@ async function latestPdf(sessionId: string) {
 
 function publicPdf(row: Record<string, unknown> | null, includeBase64 = false) {
   if (!row) return null;
+  const metadata = { ...(row.metadata as Record<string, unknown> || {}) };
+  const order = metadata.print_order as Record<string, unknown> | undefined;
+  // Private quotation receipts include an encrypted destination. Only the quotation API may expose a summary.
+  delete metadata.print_quote;
+  delete metadata.print_order;
+  delete metadata.lulu_credential_tag;
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -1776,7 +1938,8 @@ function publicPdf(row: Record<string, unknown> | null, includeBase64 = false) {
     reviewedBy: row.reviewed_by,
     reviewedAt: row.reviewed_at,
     releasedAt: row.released_at,
-    metadata: row.metadata,
+    metadata,
+    printOrder: order ? { hasIntent: true, canRequote: ['approved', 'approval_invalidated'].includes(String(order.state)) } : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(includeBase64 ? { pdfBase64: row.pdf_base64 } : {})
@@ -1798,7 +1961,7 @@ function providerDefinitions() {
     { provider: 'openai', displayName: 'GPT-5.4 / OpenAI redaccion', env: ['OPENAI_API_KEY'], required: true },
     { provider: 'anthropic', displayName: 'Claude Opus / revision', env: ['ANTHROPIC_API_KEY'], required: true },
     { provider: 'transcription', displayName: 'Transcripcion backend', env: ['FUTURE_BOOK_TRANSCRIPTION_API_KEY'], required: false },
-    { provider: 'lulu', displayName: 'Lulu print API', env: ['LULU_API_KEY'], required: false, placeholder: true }
+    { provider: 'lulu', displayName: 'Lulu print API / OAuth', env: ['LULU_CLIENT_KEY', 'LULU_CLIENT_SECRET'], required: false }
   ];
 }
 
@@ -1851,6 +2014,7 @@ async function storedProviderSetting(provider: string) {
 }
 
 async function providerSecret(provider: string) {
+  if (provider === 'lulu') return ''; // An OAuth pair must never become a generic single API key.
   const definition = providerDefinitions().find((item) => item.provider === provider);
   if (!definition) return '';
   for (const name of definition.env) {
@@ -1911,9 +2075,13 @@ type FutureBookAdminContext = {
 };
 
 const futureBookAdminPermissions: Record<string, string[]> = {
-  viewer: ['adminDashboard', 'adminMonitor', 'adminSessionDetail', 'adminPdf'],
-  support: ['adminDashboard', 'adminMonitor', 'adminSessionDetail', 'adminPdf', 'adminPatchSessionStatus'],
+  viewer: ['adminDashboard', 'adminMonitor', 'adminSessionDetail', 'adminPdf', 'adminBookJob', 'adminPrintStatus', 'adminPrintJobs', 'adminPrintJob'],
+  support: ['adminDashboard', 'adminMonitor', 'adminSessionDetail', 'adminPdf', 'adminPatchSessionStatus', 'adminBookJob', 'adminPrintStatus', 'adminPrintJobs', 'adminPrintJob'],
   editor: [
+    'adminPrintJobs', 'adminPrintJob',
+    'adminPrintStatus',
+    'adminValidatePrint',
+    'adminBookJob',
     'adminDashboard',
     'adminMonitor',
     'adminSessionDetail',
@@ -1925,6 +2093,20 @@ const futureBookAdminPermissions: Record<string, string[]> = {
     'adminReleasePdf'
   ],
   ops: [
+    'adminPrintJobs', 'adminPrintJob', 'adminResumePrint', 'adminCancelPrint',
+    'adminPrintOrder',
+    'adminApprovePrintOrder',
+    'adminSubmitPrintOrder',
+    'adminSyncPrintOrder',
+    'adminReconcilePrintOrder',
+    'adminPrintQuote',
+    'adminQuotePrint',
+    'adminShippingOptions',
+    'adminPrintStatus',
+    'adminValidatePrint',
+    'adminBookJob',
+    'adminResumeBook',
+    'adminCancelBook',
     'adminDashboard',
     'adminMonitor',
     'adminSessionDetail',
@@ -2366,13 +2548,56 @@ async function patchSession(sessionId: string, body: Record<string, unknown>) {
 }
 
 async function currentAnswerCount(sessionId: string) {
-  const rows = await rest(`future_book_answers?session_id=eq.${encodeParam(sessionId)}&select=id`);
-  return Array.isArray(rows) ? rows.length : 0;
+  const rows = await readAnswers(sessionId);
+  return new Set(rows.filter(validInterviewAnswer).map(item => Number(item.question_index))).size;
 }
 
 async function existingAnswer(sessionId: string, questionIndex: number) {
-  const rows = await rest(`future_book_answers?session_id=eq.${encodeParam(sessionId)}&question_index=eq.${questionIndex}&select=id&limit=1`);
+  const rows = await rest(`future_book_answers?session_id=eq.${encodeParam(sessionId)}&question_index=eq.${questionIndex}&select=*&limit=1`);
   return Array.isArray(rows) ? rows[0] : null;
+}
+
+function validInterviewAnswer(answer: Record<string, unknown>) {
+  const transcript = typeof answer.transcript === 'string' ? answer.transcript.trim() : '';
+  const metadata = answer.metadata as Record<string, unknown> | undefined;
+  const voiceArchived = !(metadata?.audio_captured === true || metadata?.audio_received === true)
+    || (metadata.audio_storage_status === 'stored_private' && metadata.audio_storage_verified === true
+      && Boolean(answer.audio_storage_path) && /^[0-9a-f]{64}$/.test(String(metadata.audio_sha256 || ''))
+      && Number(metadata.audio_bytes) > 0);
+  return Boolean(transcript && !/^\[Audio capturado:/i.test(transcript)
+    && ['browser', 'backend', 'manual_admin'].includes(String(answer.transcript_source))
+    && metadata?.transcription_final !== false && metadata?.answer_state !== 'follow_up_required'
+    && Number.isInteger(Number(answer.question_index)) && voiceArchived);
+}
+
+async function currentInterviewQuestion(row: Record<string, unknown>, participantName = participantNameFromRow(row)) {
+  const total = Number(row.question_count || 21);
+  const answers = await readAnswers(String(row.id));
+  const indexes = new Set(answers.filter(validInterviewAnswer).map(item => Number(item.question_index)));
+  const index = Array.from({ length: total }, (_, offset) => offset + 1).find(value => !indexes.has(value));
+  if (index === undefined) return null;
+  const draft = answers.find(item => Number(item.question_index) === index);
+  const followUp = (draft?.metadata as Record<string, unknown> | undefined)?.answer_state === 'follow_up_required';
+  return { index, total, text: followUp ? followUpFor(index) : questionFor(index, participantName), followUp };
+}
+
+async function completeInterviewSession(row: Record<string, unknown>) {
+  return ['interview_ready', 'interview_active'].includes(String(row.status))
+    ? await patchSession(String(row.id), { status: 'interview_completed', interview_completed_at: new Date().toISOString() }) : row;
+}
+
+async function savedAnswerResult(row: Record<string, unknown>, answer: Record<string, unknown>, replay = false) {
+  const totalQuestions = Number(row.question_count || 21);
+  const nextQuestion = await currentInterviewQuestion(row);
+  const completed = nextQuestion === null;
+  const updated = completed ? await completeInterviewSession(row) : row;
+  if (completed && !replay) {
+    await insertEvent(String(row.id), 'interview_completed', { answered: totalQuestions, total: totalQuestions, sprint: 3 });
+  }
+  return {
+    ok: true, saved: true, answer, completed, session: publicSession(updated),
+    nextQuestion
+  };
 }
 
 async function createSession(req: Request, payload: Record<string, unknown>) {
@@ -2544,10 +2769,9 @@ async function approveSimulatedPayment(req: Request, payload: Record<string, unk
 async function startInterview(payload: Record<string, unknown>) {
   const row = await findSession(payload);
   if (row.payment_status !== 'simulated_approved') throw new Error('Payment approval required before interview');
-  const answered = await currentAnswerCount(String(row.id));
-  const total = Number(row.question_count || 21);
-  const index = Math.min(total, answered + 1);
   const participantName = cleanParticipantName(payload.participantName) || participantNameFromRow(row);
+  const question = await currentInterviewQuestion(row, participantName);
+  if (!question) return { ok: true, completed: true, session: publicSession(await completeInterviewSession(row)), question: null };
   const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : {};
 
   const now = new Date().toISOString();
@@ -2562,7 +2786,7 @@ async function startInterview(payload: Record<string, unknown>) {
   });
 
   await insertEvent(String(row.id), 'interview_started', {
-    question_index: index,
+    question_index: question.index,
     participant_name_present: Boolean(participantName),
     sprint: 3
   });
@@ -2570,26 +2794,18 @@ async function startInterview(payload: Record<string, unknown>) {
   return {
     ok: true,
     session: publicSession(updated),
-    question: {
-      index,
-      total,
-      text: questionFor(index, participantName)
-    }
+    question
   };
 }
 
 async function getCurrentQuestion(payload: Record<string, unknown>) {
   const row = await findSession(payload);
-  const answered = await currentAnswerCount(String(row.id));
-  const index = Math.min(Number(row.question_count || 21), answered + 1);
-  const participantName = participantNameFromRow(row);
+  const question = await currentInterviewQuestion(row);
   return {
     ok: true,
-    question: {
-      index,
-      total: row.question_count || 21,
-      text: questionFor(index, participantName)
-    }
+    completed: question === null,
+    session: publicSession(question ? row : await completeInterviewSession(row)),
+    question
   };
 }
 
@@ -2784,29 +3000,78 @@ async function synthesizeQuestion(req: Request, payload: Record<string, unknown>
   };
 }
 
+async function confirmPersistedAnswer(sessionId: string, questionIndex: number, expected: Record<string, unknown>) {
+  const stored = await existingAnswer(sessionId, questionIndex);
+  const fields = ['capture_id', 'capture_input_hash', 'answer_state', 'transcription_final', 'audio_storage_status', 'audio_storage_verified', 'audio_sha256', 'audio_bytes'];
+  const actualMeta = (stored?.metadata || {}) as Record<string, unknown>;
+  const expectedMeta = (expected.metadata || {}) as Record<string, unknown>;
+  if (!stored || stored.id !== expected.id || stored.session_id !== sessionId
+    || Number(stored.question_index) !== questionIndex || stored.transcript !== expected.transcript
+    || stored.transcript_source !== expected.transcript_source || stored.audio_storage_path !== expected.audio_storage_path
+    || fields.some(field => actualMeta[field] !== expectedMeta[field])) {
+    throw new Error('answer_persistence_unconfirmed');
+  }
+  return stored;
+}
+
 async function saveAnswer(req: Request, payload: Record<string, unknown>) {
   const row = await findSession(payload);
   await enforceAbuseLimit(req, payload, 'saveAnswer', String(row.id));
-  if (!['interview_active', 'interview_ready'].includes(String(row.status))) {
-    throw new Error('Interview is not active');
-  }
-
-  const questionIndex = safeInt(payload.questionIndex, 1, 1, 99);
+  const questionIndex = Number(payload.questionIndex);
+  const totalQuestions = Number(row.question_count || 21);
+  if (!Number.isInteger(questionIndex) || questionIndex < 1 || questionIndex > totalQuestions) throw new Error('question_index_invalid');
   const questionText = safeLongText(payload.questionText, firstQuestion, 1200) || firstQuestion;
-  let transcript = safeLongText(payload.transcript, '', 12000);
+  let transcript = completeAnswerTranscript(payload.transcript);
   const durationSeconds = safeInt(payload.durationSeconds, 0, 0, 7200);
-  let transcriptSource = ['browser', 'backend', 'pending', 'manual_admin'].includes(String(payload.transcriptSource))
-    ? String(payload.transcriptSource)
-    : 'pending';
+  // Only this server can attest backend/admin provenance. Public submissions
+  // are either browser text or audio requiring transcription.
+  let transcriptSource = payload.transcriptSource === 'browser' ? 'browser' : 'pending';
+  const captureId = payload.captureId == null ? '' : String(payload.captureId);
+  if (captureId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(captureId)) throw new Error('capture_id_invalid');
+  const inputHash = captureId ? await sha256Hex(JSON.stringify({
+    sessionId: row.id, questionIndex, questionText, transcript, transcriptSource,
+    audio: safeBase64Audio(payload.audioBase64), mimeType: normalizeAudioMimeType(payload.audioMimeType),
+    durationSeconds, transcriptionFinal: payload.transcriptionFinal === true, followUp: payload.followUpAttempt === true
+  })) : null;
   const audioInput = answerAudioInput(payload);
+  const existing = await existingAnswer(String(row.id), questionIndex);
+  if (captureId && existing?.metadata?.capture_id === captureId) {
+    if (existing.metadata.capture_input_hash !== inputHash) throw new Error('capture_input_mismatch');
+    let confirmed = existing;
+    if (audioInput.bytes) {
+      const path = String(existing.audio_storage_path || '');
+      if (!path.startsWith(`${row.id}/q${String(questionIndex).padStart(2, '0')}-${captureId}.`)) {
+        return { ok: true, saved: false, needsAudioRecovery: true, errorCode: 'audio_archive_unconfirmed', session: publicSession(row) };
+      }
+      const archive = await verifyPrivateAudioArtifact(path, audioInput.bytes);
+      if (archive.status !== 'stored_private') return { ok: true, saved: false, needsAudioRecovery: true, errorCode: archive.status, session: publicSession(row) };
+      if (existing.metadata.audio_storage_verified !== true || existing.metadata.audio_sha256 !== archive.sha256
+        || existing.metadata.audio_bytes !== archive.byteLength || existing.metadata.audio_storage_status !== 'stored_private') {
+        confirmed = { ...existing, metadata: { ...existing.metadata, audio_storage_status: 'stored_private', audio_storage_verified: true, audio_sha256: archive.sha256, audio_bytes: archive.byteLength } };
+        await rest(`future_book_answers?id=eq.${encodeParam(String(existing.id))}`, { method: 'PATCH', body: { metadata: confirmed.metadata } });
+      }
+    }
+    confirmed = await confirmPersistedAnswer(String(row.id), questionIndex, confirmed);
+    if (validInterviewAnswer(confirmed)) return await savedAnswerResult(row, confirmed, true);
+    if (existing.metadata.answer_state === 'follow_up_required') {
+      return { ok: true, saved: false, needsFollowUp: true, answer: confirmed, session: publicSession(row),
+        question: { index: questionIndex, total: totalQuestions, text: followUpFor(questionIndex), followUp: true } };
+    }
+  }
+  if (captureId && existing?.metadata?.capture_id && existing.metadata.capture_id !== captureId && validInterviewAnswer(existing)) throw new Error('answer_capture_already_saved');
+  if (!['interview_active', 'interview_ready'].includes(String(row.status))) throw new Error('Interview is not active');
   const audioMimeType = audioInput.mimeType || safeText(payload.audioMimeType, '', 80) || null;
   let transcriptionStatus = pendingTranscript(transcript, transcriptSource) ? 'pending' : 'provided_by_client';
   let transcriptionProvider = transcriptSource === 'backend' ? 'backend' : transcriptSource;
-  let audioStorage = { status: audioInput.error || 'no_audio_received', path: null as string | null };
+  let audioStorage = { status: audioInput.error || 'no_audio_received', path: null as string | null, sha256: null as string | null, byteLength: 0 };
 
   if (audioInput.bytes) {
-    audioStorage = await uploadPrivateAudioArtifact(String(row.id), questionIndex, audioInput.mimeType, audioInput.bytes);
-    if (pendingTranscript(transcript, transcriptSource)) {
+    if (!storeAudioEnabled()) return { ok: true, saved: false, needsAudioRecovery: true, errorCode: 'audio_retention_disabled', session: publicSession(row) };
+    audioStorage = { ...audioStorage, ...await uploadPrivateAudioArtifact(String(row.id), questionIndex, audioInput.mimeType, audioInput.bytes, captureId) };
+    if (audioStorage.status !== 'stored_private') {
+      return { ok: true, saved: false, needsAudioRecovery: true, errorCode: audioStorage.status, session: publicSession(row) };
+    }
+    if (pendingTranscript(transcript, transcriptSource) || payload.transcriptionFinal !== true) {
       const backendTranscript = await transcribeAnswerAudio({
         sessionId: String(row.id),
         questionIndex,
@@ -2828,6 +3093,14 @@ async function saveAnswer(req: Request, payload: Record<string, unknown>) {
       audio_bytes: audioInput.byteLength,
       sprint: 8
     }).catch(() => null);
+    return { ok: true, saved: false, needsAudioRecovery: true, errorCode: audioInput.error, session: publicSession(row) };
+  } else if (payload.audioCaptured === true) {
+    return { ok: true, saved: false, needsAudioRecovery: true, errorCode: 'captured_audio_missing', session: publicSession(row) };
+  }
+
+  if (!transcript || pendingTranscript(transcript, transcriptSource)
+    || (transcriptSource !== 'backend' && payload.transcriptionFinal !== true)) {
+    return { ok: true, saved: false, needsTranscription: true, errorCode: transcriptionStatus, session: publicSession(row) };
   }
 
   const densityScore = narrativeDensityScore(transcript);
@@ -2835,7 +3108,6 @@ async function saveAnswer(req: Request, payload: Record<string, unknown>) {
   const qualityScore = Number.isFinite(submittedQuality) && transcriptSource !== 'backend'
     ? clampNumber(submittedQuality, 0.15, 0, 1)
     : clampNumber(undefined, transcript ? Math.max(0.35, densityScore) : 0.15, 0, 1);
-  const totalQuestions = Number(row.question_count || 21);
   const isSuperficial = transcriptSource !== 'pending' && (wordCount(transcript) < 12 || densityScore < 0.22);
 
   if (payload.followUpAttempt !== true && isSuperficial) {
@@ -2847,10 +3119,29 @@ async function saveAnswer(req: Request, payload: Record<string, unknown>) {
       density_score: densityScore,
       sprint: 8
     });
+    // Retain the initial words/audio within the answer's retention policy, but
+    // do not count this draft as a completed answer.
+    const draftBody = {
+        session_id: row.id, question_index: questionIndex, question_text: questionText,
+        transcript, transcript_source: transcriptSource, audio_storage_path: audioStorage.path,
+        audio_mime_type: audioMimeType, duration_seconds: durationSeconds || null, quality_score: qualityScore,
+        metadata: { capture_id: captureId || null, capture_input_hash: inputHash,
+          answer_state: 'follow_up_required', transcription_final: true, audio_storage_status: audioStorage.status,
+          audio_storage_verified: audioStorage.status === 'stored_private', audio_sha256: audioStorage.sha256,
+          audio_bytes: audioInput.byteLength, audio_received: Boolean(audioInput.bytes), audio_captured: payload.audioCaptured === true }
+      };
+    let draft = first(await rest(existing?.id
+      ? `future_book_answers?id=eq.${encodeParam(existing.id)}` : 'future_book_answers', {
+      method: existing?.id ? 'PATCH' : 'POST',
+      body: draftBody
+    })) as Record<string, unknown> | null;
+    if (!draft?.id) throw new Error('answer_persistence_unconfirmed');
+    draft = await confirmPersistedAnswer(String(row.id), questionIndex, { ...draftBody, id: draft.id });
     return {
       ok: true,
       saved: false,
       needsFollowUp: true,
+      answer: draft,
       session: publicSession(row),
       question: {
         index: questionIndex,
@@ -2861,7 +3152,10 @@ async function saveAnswer(req: Request, payload: Record<string, unknown>) {
     };
   }
 
-  const existing = await existingAnswer(String(row.id), questionIndex);
+  const previousDraft = existing?.metadata?.answer_state === 'follow_up_required' ? existing : null;
+  if (previousDraft?.transcript) {
+    transcript = completeAnswerTranscript(`${previousDraft.transcript}\n\n${transcript}`);
+  }
   const answerBody = {
     session_id: row.id,
     question_index: questionIndex,
@@ -2874,10 +3168,16 @@ async function saveAnswer(req: Request, payload: Record<string, unknown>) {
     quality_score: qualityScore,
     metadata: {
       sprint: 8,
+      capture_id: captureId || null,
+      capture_input_hash: inputHash,
+      answer_state: 'complete',
+      initial_audio_storage_path: previousDraft?.audio_storage_path || null,
       audio_captured: payload.audioCaptured === true,
       audio_received: Boolean(audioInput.bytes),
       audio_bytes: audioInput.byteLength || safeInt(payload.audioByteLength, 0, 0, 25 * 1024 * 1024),
       audio_storage_status: audioStorage.status,
+      audio_storage_verified: audioStorage.status === 'stored_private',
+      audio_sha256: audioStorage.sha256,
       browser_speech_supported: payload.browserSpeechSupported === true,
       transcription_final: transcriptSource === 'backend' || payload.transcriptionFinal === true,
       transcription_status: transcriptionStatus,
@@ -2888,12 +3188,14 @@ async function saveAnswer(req: Request, payload: Record<string, unknown>) {
     }
   };
 
-  const created = first(await rest(existing?.id
+  let created = first(await rest(existing?.id
     ? `future_book_answers?id=eq.${encodeParam(existing.id)}`
     : 'future_book_answers', {
       method: existing?.id ? 'PATCH' : 'POST',
       body: answerBody
     })) as Record<string, unknown> | null;
+  if (!created?.id) throw new Error('answer_persistence_unconfirmed');
+  created = await confirmPersistedAnswer(String(row.id), questionIndex, { ...answerBody, id: created.id });
 
   await rest('future_book_artifacts', {
     method: 'POST',
@@ -2928,43 +3230,12 @@ async function saveAnswer(req: Request, payload: Record<string, unknown>) {
     sprint: 8
   });
 
-  const answered = await currentAnswerCount(String(row.id));
-  const completed = answered >= totalQuestions;
-  const updated = completed
-    ? await patchSession(String(row.id), {
-      status: 'interview_completed',
-      interview_completed_at: new Date().toISOString()
-    })
-    : row;
-
-  if (completed) {
-    await insertEvent(String(row.id), 'interview_completed', {
-      answered,
-      total: totalQuestions,
-      sprint: 3
-    });
-  }
-
-  const nextIndex = Math.min(totalQuestions, questionIndex + 1);
-  const participantName = participantNameFromRow(row);
-
-  return {
-    ok: true,
-    saved: true,
-    answer: created,
-    completed,
-    session: publicSession(updated),
-    nextQuestion: completed ? null : {
-      index: nextIndex,
-      total: totalQuestions,
-      text: questionFor(nextIndex, participantName)
-    }
-  };
+  return await savedAnswerResult(row, created);
 }
 
 async function readAnswers(sessionId: string) {
   const rows = await rest(
-    `future_book_answers?session_id=eq.${encodeParam(sessionId)}&select=question_index,question_text,transcript,transcript_source,duration_seconds,quality_score,created_at&order=question_index.asc`
+    `future_book_answers?session_id=eq.${encodeParam(sessionId)}&select=question_index,question_text,transcript,transcript_source,duration_seconds,quality_score,audio_storage_path,metadata,created_at&order=question_index.asc`
   );
   return Array.isArray(rows) ? rows as Array<Record<string, unknown>> : [];
 }
@@ -3043,253 +3314,322 @@ function publicManuscript(row: Record<string, unknown> | null) {
   };
 }
 
+async function bookModelSettings() {
+  const [openaiKey, anthropicKey] = await Promise.all([providerSecret('openai'), providerSecret('anthropic')]);
+  return {
+    openaiKey, anthropicKey,
+    writerModel: Deno.env.get('FUTURE_BOOK_WRITER_MODEL') || Deno.env.get('FUTURE_BOOK_OPENAI_MODEL') || Deno.env.get('OPENAI_MODEL') || '',
+    reviewerModel: Deno.env.get('FUTURE_BOOK_REVIEWER_MODEL') || Deno.env.get('ANTHROPIC_MODEL') || ''
+  };
+}
+
+function queueBookWake(jobId: string, delaySeconds = 0) {
+  if (typeof EdgeRuntime === 'undefined') return;
+  EdgeRuntime.waitUntil((async () => {
+    if (delaySeconds) await new Promise(resolve => setTimeout(resolve, Math.min(delaySeconds, 30) * 1000));
+    const response = await fetch(`${supabaseUrl}/functions/v1/future-book-session`, {
+      method: 'POST', headers: { 'content-type': 'application/json', Authorization: `Bearer ${serviceRoleKey}` },
+      body: JSON.stringify({ action: 'advanceBook', jobId }), signal: AbortSignal.timeout(10000)
+    });
+    if (!response.ok) throw new Error('book_wake_unavailable');
+    await response.body?.cancel();
+  })().catch(() => console.error(JSON.stringify({ event: 'book_wake_failed', jobId }))));
+}
+
+function bookEngine() {
+  return createBookEngine({ rest, settings: bookModelSettings, wake: queueBookWake });
+}
+
+async function advanceBook(req: Request, payload: Record<string, unknown>) {
+  if (!serviceRoleKey || req.headers.get('authorization') !== `Bearer ${serviceRoleKey}`) {
+    await requireFutureBookMonitorCaller(req, payload);
+  }
+  const jobId = payload.jobId == null ? null : String(payload.jobId);
+  if (jobId && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(jobId)) {
+    throw new Error('invalid_book_job_id');
+  }
+  const work = bookEngine().advance(jobId).catch((error: { code?: string }) => {
+    const errorCode = /^[a-z_]{1,80}$/.test(error?.code || '') ? error.code : 'book_worker_failed';
+    console.error(JSON.stringify({ event: 'book_worker_failed', jobId, errorCode }));
+    return { status: 'failed', errorCode };
+  });
+  if (typeof EdgeRuntime !== 'undefined') {
+    EdgeRuntime.waitUntil(work);
+    return { ok: true, accepted: true, jobId };
+  }
+  return { ok: true, ...await work };
+}
+
 async function getBookStatus(payload: Record<string, unknown>) {
   const row = await findSession(payload);
-  const manuscript = await latestManuscript(String(row.id));
-  return {
-    ok: true,
-    session: publicSession(row),
-    manuscript: publicManuscript(manuscript)
-  };
+  const result = await bookEngine().status(String(row.id));
+  const manuscript = result.job ? result.manuscript : await latestManuscript(String(row.id));
+  return { ok: true, session: publicSession(row), job: result.job, manuscript: publicManuscript(manuscript) };
 }
 
 async function generateBook(req: Request, payload: Record<string, unknown>) {
   const row = await findSession(payload);
-  await enforceAbuseLimit(req, payload, 'generateBook', String(row.id));
-  if (row.status !== 'interview_completed' && row.status !== 'book_ready') {
-    throw new Error('Interview must be completed before generating the book');
-  }
+  const engine = bookEngine();
+  const current = await engine.status(String(row.id));
+  if (!current.job) await enforceAbuseLimit(req, payload, 'generateBook', String(row.id));
+  const result = await engine.enqueue(row, await readAnswers(String(row.id)));
+  const updated = await findSession(payload);
+  return { ok: true, session: publicSession(updated), job: result.job, manuscript: publicManuscript(result.manuscript) };
+}
 
-  const missing = await missingRequiredProviders('book');
-  if (missing.length && strictAiProvidersRequired()) {
-    await blockBookGenerationForMissingProviders(row, missing);
-    throw new Error(`Required AI providers missing: ${missing.join(', ')}`);
-  }
+async function adminBookJob(req: Request, payload: Record<string, unknown>) {
+  await requireFutureBookAdmin(req, payload, 'adminBookJob');
+  const jobId = safeText(payload.jobId, '', 80);
+  const job = first(await rest(`future_book_jobs?id=eq.${encodeParam(jobId)}&select=id,session_id,status,stage,error_code,model_config,manuscript_id,created_at,updated_at&limit=1`)) as Record<string, unknown> | null;
+  if (!job) throw new Error('book_job_not_found');
+  const steps = await rest(`future_book_job_steps?job_id=eq.${encodeParam(jobId)}&select=step_key,stage,unit_id,status,attempt,provider,model,provider_request_id,input_hash,usage,diagnostic,error_code,updated_at&order=created_at.asc`);
+  const manuscript = job.status === 'ready' && job.manuscript_id
+    ? first(await rest(`future_book_manuscripts?id=eq.${encodeParam(job.manuscript_id)}&select=*&limit=1`)) as Record<string, unknown> | null : null;
+  return { ok: true, job, steps, manuscript: publicManuscript(manuscript) };
+}
 
-  const existing = await latestManuscript(String(row.id));
-  if (existing?.id && payload.force !== true) {
-    return {
-      ok: true,
-      reused: true,
-      session: publicSession(row),
-      manuscript: publicManuscript(existing)
-    };
-  }
+async function adminChangeBookJob(req: Request, payload: Record<string, unknown>, action: 'adminResumeBook' | 'adminCancelBook') {
+  const admin = await requireFutureBookAdmin(req, payload, action);
+  const jobId = safeText(payload.jobId, '', 80);
+  const reason = safeLongText(payload.reason, '', 1000);
+  if (reason.length < 8) throw new Error('book_job_reason_required');
+  const procedure = action === 'adminResumeBook' ? 'caronte_resume_book_job' : 'caronte_cancel_blocked_book_job';
+  const job = first(await rest(`rpc/${procedure}`, { method: 'POST', body: { p_job_id: jobId, p_reason: reason } })) as Record<string, unknown> | null;
+  if (!job?.id) throw new Error('book_job_not_found');
+  await auditFutureBookAdmin(req, admin, action, 'future_book_job', jobId, { reason, status: job.status });
+  if (action === 'adminResumeBook') queueBookWake(jobId);
+  return { ok: true, job: { id: job.id, status: job.status, stage: job.stage, error_code: job.error_code } };
+}
 
-  const answers = await readAnswers(String(row.id));
-  const expected = Number(row.question_count || 21);
-  if (answers.length < expected) {
-    throw new Error(`Missing answers: ${answers.length}/${expected}`);
-  }
-
-  const now = new Date().toISOString();
-  const generating = await patchSession(String(row.id), {
-    status: 'book_generating',
-    book_status: 'generating',
-    book_generation_started_at: now
-  });
-
-  await insertEvent(String(row.id), 'book_generation_started', {
-    answers: answers.length,
-    expected,
-    prompt_version: CARONTE_PROMPT_VERSION,
-    sprint: 9
-  });
-
-  const deterministic = buildDeterministicManuscript(answers, row);
-  const psychological = await buildPsychologicalMap(answers, row);
-  const outline = buildNarrativeOutline(psychological.map, answers);
-  const psychMapRow = await storePsychMap({
-    sessionId: String(row.id),
-    psychMap: psychological.map,
-    outline,
-    provider: psychological.provider,
-    usage: psychological.usage || {},
-    degraded: psychological.degraded === true
-  });
-
-  await insertEvent(String(row.id), 'caronte_psych_map_generated', {
-    psych_map_id: psychMapRow.id,
-    version: psychMapRow.version,
-    provider: psychological.provider,
-    degraded: psychological.degraded === true,
-    sprint: 9
-  });
-
-  let ai = await buildAiManuscript(answers, deterministic, psychological.map, outline);
-  let caronteEvaluation = evaluateCaronteManuscript(answers, ai.manuscript, psychological.map);
-  let rewrite = {
-    attempted: false,
-    applied: false,
-    reason: caronteEvaluation.needs_rewrite === true ? caronteEvaluation.verdict : 'not_needed',
-    before: caronteEvaluation
-  } as Record<string, unknown>;
-
-  if (caronteEvaluation.needs_rewrite === true && ai.degraded !== true) {
-    await insertEvent(String(row.id), 'caronte_rewrite_requested', {
-      reason: caronteEvaluation.verdict,
-      genericity_score: caronteEvaluation.genericity_score,
-      personalization_score: caronteEvaluation.personalization_score,
-      safety_score: caronteEvaluation.safety_score,
-      sprint: 9
-    });
-    const rewriteInstruction = [
-      `Reescribe para corregir: ${caronteEvaluation.verdict}.`,
-      `Personalizacion actual=${caronteEvaluation.personalization_score}; genericidad=${caronteEvaluation.genericity_score}; seguridad=${caronteEvaluation.safety_score}.`,
-      'Aumenta escenas concretas tomadas de respuestas, elimina frases genericas y conserva los avisos de limites.'
-    ].join(' ');
-    const rewritten = await buildAiManuscript(answers, ai.manuscript, psychological.map, outline, rewriteInstruction);
-    const rewrittenEvaluation = evaluateCaronteManuscript(answers, rewritten.manuscript, psychological.map);
-    const beforeScore = Number(caronteEvaluation.personalization_score || 0) + (1 - Number(caronteEvaluation.genericity_score || 1)) + Number(caronteEvaluation.safety_score || 0);
-    const afterScore = Number(rewrittenEvaluation.personalization_score || 0) + (1 - Number(rewrittenEvaluation.genericity_score || 1)) + Number(rewrittenEvaluation.safety_score || 0);
-    if (rewritten.degraded !== true && afterScore >= beforeScore) {
-      ai = {
-        ...rewritten,
-        provider: `${rewritten.provider}+rewrite`
-      };
-      caronteEvaluation = rewrittenEvaluation;
-      rewrite = {
-        attempted: true,
-        applied: true,
-        reason: 'quality_improved',
-        before: rewrite.before,
-        after: rewrittenEvaluation,
-        provider: rewritten.provider
-      };
-    } else {
-      rewrite = {
-        attempted: true,
-        applied: false,
-        reason: rewritten.degraded === true ? 'rewrite_provider_failed' : 'rewrite_did_not_improve',
-        before: rewrite.before,
-        after: rewrittenEvaluation,
-        provider: rewritten.provider
-      };
+const printJobFields = 'id,pdf_id,session_id,manuscript_id,version,status,stage,error_code,created_at,updated_at';
+function printJobId(value: unknown) {
+  if (typeof value !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)) throw new Error('print_job_scope');
+  return value;
+}
+function minimalPrintJob(row: Record<string, unknown>) {
+  return Object.fromEntries(printJobFields.split(',').map(key => [key, row[key] ?? null]));
+}
+async function printJobsPage(payload: Record<string, unknown>) {
+  const limit = payload.limit === undefined ? 100 : payload.limit;
+  const offset = payload.offset === undefined ? 0 : payload.offset;
+  if (!Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 100 || !Number.isSafeInteger(offset)
+    || Number(offset) < 0 || Number(offset) > 10000) throw new Error('print_pagination_invalid');
+  if (!printQueueEnabled()) return { available: false, errorCode: 'print_queue_disabled', items: null, hasMore: false, nextOffset: null };
+  const rows = await printDatabaseRest(`future_book_print_jobs?select=${printJobFields}&order=created_at.desc,id.desc&limit=${Number(limit)+1}&offset=${offset}`);
+  if (!Array.isArray(rows)) throw new Error('print_queue_unavailable');
+  const hasMore = rows.length > Number(limit) && Number(offset)+Number(limit) <= 10000;
+  return { available: true, items: rows.slice(0,Number(limit)).map(minimalPrintJob), hasMore,
+    nextOffset: hasMore ? Number(offset)+Number(limit) : null };
+}
+async function adminPrintJobs(req: Request, payload: Record<string, unknown>) {
+  await requireFutureBookAdmin(req, payload, 'adminPrintJobs');
+  try { return { ok: true, ...await printJobsPage(payload) }; } catch (error) { throw printQueueError(error); }
+}
+async function printJobDetail(jobId: string, admin: FutureBookAdminContext) {
+  const row = first(await printDatabaseRest(`future_book_print_jobs?id=eq.${encodeParam(jobId)}&select=${printJobFields},lease_token,lease_until,control_history&limit=1`)) as Record<string, unknown> | null;
+  if (!row || row.id !== jobId) throw new Error('print_job_not_found');
+  const rows = await printDatabaseRest(`future_book_print_steps?job_id=eq.${encodeParam(jobId)}&select=step_key,stage,status,attempt,output_hash,error_code,updated_at&order=created_at.asc,step_key.asc`);
+  if (!Array.isArray(rows)) throw new Error('print_queue_unavailable');
+  const fields = ['step_key','stage','status','attempt','output_hash','error_code','updated_at'];
+  const steps = rows.map(row => Object.fromEntries(fields.map(key => [key,row[key] ?? null])));
+  const blocked = row.status === 'blocked' && !row.lease_token && !row.lease_until;
+  const failed = steps.filter(step => step.status === 'failed');
+  const safe = ['print_archive_unverified','print_archive_timeout'];
+  const history = Array.isArray(row.control_history) ? row.control_history : [];
+  const last = history.at(-1);
+  return { ok: true, job: minimalPrintJob(row), steps,
+    canResume: Boolean(blocked && canRunAdminAction(admin.role,'adminResumePrint') && safe.includes(String(row.error_code))
+      && failed.length === 1 && failed[0].stage !== 'gate' && failed[0].error_code === row.error_code),
+    canCancel: Boolean(blocked && canRunAdminAction(admin.role,'adminCancelPrint')),
+    lastControl: last ? { action: last.action, previousRevision: last.previousRevision, at: last.at } : null };
+}
+async function adminPrintJob(req: Request, payload: Record<string, unknown>) {
+  const admin = await requireFutureBookAdmin(req,payload,'adminPrintJob');
+  if (!printQueueEnabled()) throw new Error('print_queue_disabled');
+  try { return await printJobDetail(printJobId(payload.jobId),admin); } catch (error) { throw printQueueError(error); }
+}
+async function adminChangePrintJob(req: Request, payload: Record<string, unknown>, action: 'adminResumePrint' | 'adminCancelPrint') {
+  const admin = await requireFutureBookAdmin(req,payload,action);
+  if (!printQueueEnabled()) throw new Error('print_queue_disabled');
+  const jobId = printJobId(payload.jobId), reason = typeof payload.reason === 'string' ? payload.reason.trim() : '';
+  const revision = payload.expectedRevision;
+  if (reason.length < 8 || reason.length > 1000) throw new Error('print_control_reason_required');
+  if (typeof revision !== 'string' || revision.length > 80 || !Number.isFinite(Date.parse(revision))) throw new Error('print_control_revision_required');
+  const decision = action === 'adminResumePrint' ? 'resume' : 'cancel';
+  try {
+    const current = await printJobDetail(jobId,admin);
+    if (current.job.updated_at !== revision) throw new Error('print_control_conflict');
+    if (!(decision === 'resume' ? current.canResume : current.canCancel)) throw new Error('print_control_not_allowed');
+    // A lost RPC receipt is reconciled by a separate read, never a second POST.
+    let failure: unknown;
+    try { await printDatabaseRest('rpc/caronte_control_print_job', { method:'POST',body:{p_job_id:jobId,
+      p_expected_revision:revision,p_action:decision,p_reason:reason,
+      p_actor:{role:admin.role,adminUserId:admin.adminUserId,email:admin.email}} }); } catch (error) { failure = error; }
+    const confirmed = await printJobDetail(jobId,admin);
+    if (confirmed.lastControl?.action !== decision || confirmed.lastControl?.previousRevision !== revision
+      || (decision === 'cancel' ? confirmed.job.status !== 'cancelled' : !['queued','running','ready','blocked'].includes(String(confirmed.job.status)))) {
+      const code = String((failure as Error)?.message || '');
+      if (code.includes('print_control_conflict')) throw new Error('print_control_conflict');
+      if (code.includes('print_source_changed')) throw new Error('print_source_changed');
+      throw new Error('print_control_unconfirmed');
     }
-  }
-
-  const externalReview = await reviewWithAnthropic(ai.manuscript, psychological.map, caronteEvaluation).catch((error) => ({
-    provider: 'anthropic',
-    status: 'failed',
-    detail: error instanceof Error ? error.message : 'unknown'
-  }));
-  const degraded = psychological.degraded === true || ai.degraded === true || !externalReview || externalReview.status === 'failed';
-  const qualityReport = buildQualityReport(answers, ai.manuscript, externalReview, degraded, {
-    ...caronteEvaluation,
-    rewrite
-  }, psychological.map);
-  const providerChain = {
-    psych_map_id: psychMapRow.id,
-    psych_map_version: psychMapRow.version,
-    map_builder: psychological.provider,
-    drafting: ai.provider,
-    reviewer: externalReview?.provider || 'none',
-    outline: CARONTE_OUTLINE_VERSION,
-    rewrite,
-    degraded,
-    missing_required_providers: missing,
-    map_usage: psychological.usage || {},
-    openai_usage: ai.usage || {},
-    anthropic_usage: externalReview?.usage || {},
-    prompt_version: CARONTE_PROMPT_VERSION
-  };
-
-  const manuscriptRow = first(await rest('future_book_manuscripts', {
-    method: 'POST',
-    body: {
-      session_id: row.id,
-      psych_map_id: psychMapRow.id,
-      status: 'ready',
-      title: safeText(ai.manuscript.title, 'Futuro Anterior', 220),
-      manuscript: ai.manuscript,
-      quality_report: qualityReport,
-      provider_chain: providerChain,
-      prompt_version: CARONTE_PROMPT_VERSION,
-      page_target_min: 35,
-      page_target_max: 60,
-      quality_score: qualityReport.score
-    }
-  })) as Record<string, unknown> | null;
-
-  if (!manuscriptRow?.id) throw new Error('Could not store manuscript');
-
-  await rest('future_book_artifacts', {
-    method: 'POST',
-    body: {
-      session_id: row.id,
-      artifact_type: 'manuscript',
-      provider: String(ai.provider || 'deterministic'),
-      mime_type: 'application/json',
-      metadata: {
-        manuscript_id: manuscriptRow.id,
-        title: manuscriptRow.title,
-        quality_score: qualityReport.score,
-        section_count: Array.isArray(ai.manuscript.sections) ? ai.manuscript.sections.length : 0,
-        psych_map_id: psychMapRow.id,
-        caronte_status: qualityReport.status,
-        prompt_version: CARONTE_PROMPT_VERSION,
-        sprint: 9
-      }
-    },
-    prefer: 'return=minimal'
-  });
-
-  await insertEvent(String(row.id), 'book_quality_reviewed', {
-    quality_score: qualityReport.score,
-    reviewer: externalReview?.provider || 'none',
-    caronte_status: qualityReport.status,
-    genericity_score: caronteEvaluation.genericity_score,
-    personalization_score: caronteEvaluation.personalization_score,
-    safety_score: caronteEvaluation.safety_score,
-    rewrite_attempted: rewrite.attempted === true,
-    rewrite_applied: rewrite.applied === true,
-    sprint: 9
-  });
-
-  const completed = await patchSession(String(row.id), {
-    status: 'book_ready',
-    book_status: 'ready',
-    book_generation_completed_at: new Date().toISOString()
-  });
-
-  await insertEvent(String(row.id), 'book_generation_completed', {
-    manuscript_id: manuscriptRow.id,
-    psych_map_id: psychMapRow.id,
-    title: manuscriptRow.title,
-    prompt_version: CARONTE_PROMPT_VERSION,
-    sprint: 9
-  });
-
-  return {
-    ok: true,
-    reused: false,
-    session: publicSession(completed || generating),
-    manuscript: publicManuscript(manuscriptRow)
-  };
+    return confirmed;
+  } catch (error) { throw printQueueError(error); }
 }
 
 async function getPdfStatus(payload: Record<string, unknown>) {
   const row = await findSession(payload);
-  const pdf = await latestPdf(String(row.id));
-  return {
-    ok: true,
-    session: publicSession(row),
-    pdf: publicPdf(pdf, false)
+  if (printQueueEnabled()) {
+    try {
+      const result = await printEngine().status(String(row.id));
+      const pdf = result.job ? result.pdf : await latestPdf(String(row.id));
+      const updated = await findSession(payload);
+      return { ok: true, session: publicSession(updated), job: result.job, pdf: publicPdf(pdf, false) };
+    } catch (error) { throw printQueueError(error); }
+  }
+  return { ok: true, session: publicSession(row), job: null, pdf: publicPdf(await latestPdf(String(row.id)), false) };
+}
+
+function printQueueEnabled() {
+  return Deno.env.get('CARONTE_PRINT_QUEUE_ENABLED') === 'true';
+}
+
+function printQueueError(error: unknown) {
+  const value = error as { code?: string; message?: string };
+  const code = value?.code || value?.message || '';
+  return new Error(/^(print_[a-z_]{1,70}|active_print_source_changed|lease_lost)$/.test(code) ? code : 'print_queue_unavailable');
+}
+
+function printEngine() {
+  // Loading fonts is deferred until a worker renders. Status/enqueue never render.
+  const stage = (name: string) => async (...args: unknown[]) => (await loadPrintStages())[name](...args);
+  return createPrintEngine({ rest: printDatabaseRest,
+    stages: Object.fromEntries(['planChapter','composeLayout','renderInteriorPart','mergeInterior','renderCover'].map(name => [name,stage(name)])),
+    archive: createPrintStageArchive({ url: supabaseUrl, serviceKey: serviceRoleKey, fetch }),
+    settings: async () => {
+      const credentials = await luluCredentials();
+      if (!credentials.configured) throw new Error('print_lulu_credentials_required');
+      return { environment: credentials.environment, configurationTag: credentials.configurationTag, podPackageId: LULU_A5_PAPERBACK_SKU };
+    },
+    coverDimensions: async (job: Record<string, unknown>, pageCount: number) => {
+      const credentials = await luluCredentials();
+      if (!credentials.configured || credentials.environment !== job.lulu_environment || credentials.configurationTag !== job.lulu_configuration_tag) {
+        throw new Error('print_lulu_configuration_changed');
+      }
+      const result = await createLuluPrintClient(credentials).calculateCoverDimensions({
+        pod_package_id: job.pod_package_id, interior_page_count: pageCount, unit: 'pt' });
+      if (result.unit !== 'pt' || !/^\d+(?:\.\d+)?$/.test(String(result.width)) || !/^\d+(?:\.\d+)?$/.test(String(result.height))) {
+        throw new Error('print_lulu_dimensions_invalid');
+      }
+      return { width: Number(result.width), height: Number(result.height), source: 'lulu-api', pageCount,
+        podPackageId: job.pod_package_id, environment: credentials.environment };
+    }
+  });
+}
+
+async function advancePrint(req: Request, payload: Record<string, unknown>) {
+  if (!serviceRoleKey || req.headers.get('authorization') !== `Bearer ${serviceRoleKey}`) {
+    await requireFutureBookMonitorCaller(req, payload);
+  }
+  if (!printQueueEnabled()) throw new Error('print_queue_disabled');
+  const jobId = payload.jobId == null ? null : payload.jobId;
+  if (jobId !== null && (typeof jobId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(jobId))) {
+    throw new Error('invalid_print_job_id');
+  }
+  // One synchronous claim. The independent recovery runner starts the next HTTP
+  // request; never recursively self-wake 49 stages inside one Edge trace.
+  try { return { ok: true, ...await printEngine().advance(jobId) }; }
+  catch (error) { throw printQueueError(error); }
+}
+
+function printJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(printJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${printJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function generateProductionPrintPdf(row: Record<string, unknown>, manuscript: Record<string, unknown>, version: number, degraded: boolean) {
+  if (degraded) throw new Error('print_manuscript_not_approved');
+  const credentials = await luluCredentials();
+  if (!credentials.configured) throw new Error('print_lulu_credentials_required');
+  const environment = credentials.environment;
+  const lulu = createLuluPrintClient(credentials);
+  const bundle = await renderPrintBundle(manuscript.manuscript, {
+    coverDimensions: async (pageCount: number) => {
+      const result = await lulu.calculateCoverDimensions({ pod_package_id: LULU_A5_PAPERBACK_SKU, interior_page_count: pageCount, unit: 'pt' });
+      if (result.unit !== 'pt' || !/^\d+(?:\.\d+)?$/.test(String(result.width)) || !/^\d+(?:\.\d+)?$/.test(String(result.height))) throw new Error('print_lulu_dimensions_invalid');
+      return { width: Number(result.width), height: Number(result.height), source: 'lulu-api',
+        pageCount, podPackageId: LULU_A5_PAPERBACK_SKU, environment };
+    }
+  });
+  const archive = createPrintArchive({ url: Deno.env.get('SUPABASE_URL') || '', serviceKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '', fetch });
+  const storage = await archive({ sessionId: String(row.id), version, artifactId: crypto.randomUUID(), files: bundle });
+  const printValidation = {
+    template: bundle.interior.template, ready_for_print: false, status: 'pending_external_preflight',
+    page_count: bundle.interior.pageCount, fonts_embedded: true, separate_cover: true,
+    human_editorial_review: 'pending', lulu_interior_preflight: 'pending', lulu_cover_preflight: 'pending',
+    source_sha256: bundle.sourceSha256, interior_sha256: storage.interior.sha256, cover_sha256: storage.cover.sha256
   };
+  const fileName = stablePdfFileName(String(row.id), version);
+  const luluMetadata = {
+    ready_for_print: false, ready_for_print_status: 'pending_external_preflight', send_to_lulu: false,
+    title: bundle.title, language: 'es', trim_size: 'A5',
+    trim_width_points: bundle.interior.width, trim_height_points: bundle.interior.height,
+    pod_package_id: LULU_A5_PAPERBACK_SKU, environment,
+    interior_pdf_storage_path: storage.interior.path, cover_pdf_storage_path: storage.cover.path,
+    cover_status: 'separate_full_spread_pending_preflight', cover_dimensions: bundle.cover.dimensions,
+    interior_sha256: storage.interior.sha256, cover_sha256: storage.cover.sha256
+  };
+  const created = first(await rest('future_book_pdfs', { method: 'POST', body: {
+    session_id: row.id, manuscript_id: manuscript.id, version, status: 'generated', review_status: 'pending_review',
+    file_name: fileName, mime_type: 'application/pdf', pdf_base64: null, page_size: 'A5',
+    page_count: bundle.interior.pageCount, storage_path: storage.interior.path,
+    print_validation: printValidation, lulu_metadata: luluMetadata,
+    quality_report: { ...printValidation, word_count: bundle.wordCount, paragraph_count: bundle.interior.paragraphCount,
+      byte_size: bundle.interior.byteSize, cover_byte_size: bundle.cover.byteSize, font_size: bundle.layout.size,
+      leading: bundle.layout.leading, margins: bundle.layout.margins, chapter_starts: bundle.layout.chapterStarts },
+    metadata: { template: bundle.interior.template, storage_mode: 'private_storage_primary', artifact_id: storage.artifactId,
+      storage_verified: true, lulu_dimensions_called: true, lulu_preflight_called: false, lulu_order_created: false }
+  } })) as Record<string, unknown> | null;
+  if (!created?.id) throw new Error('print_bundle_persistence_unverified');
+  const persisted = first(await rest(`future_book_pdfs?id=eq.${encodeParam(String(created.id))}&select=*&limit=1`)) as Record<string, unknown> | null;
+  if (!persisted || persisted.session_id !== row.id || persisted.manuscript_id !== manuscript.id || persisted.version !== version ||
+      persisted.storage_path !== storage.interior.path || persisted.page_count !== bundle.interior.pageCount ||
+      printJson(persisted.lulu_metadata) !== printJson(luluMetadata) ||
+      printJson(persisted.print_validation) !== printJson(printValidation)) throw new Error('print_bundle_persistence_unverified');
+  await patchSession(String(row.id), { status: 'pending_review', pdf_review_status: 'pending_review', pdf_ready_at: new Date().toISOString() });
+  const updated = first(await rest(`future_book_sessions?id=eq.${encodeParam(String(row.id))}&select=*&limit=1`)) as Record<string, unknown> | null;
+  if (!updated || updated.status !== 'pending_review' || updated.pdf_review_status !== 'pending_review') throw new Error('print_session_persistence_unverified');
+  await insertEvent(String(row.id), 'pdf_generation_completed', { pdf_id: persisted.id, version,
+    page_count: bundle.interior.pageCount, separate_cover: true, ready_for_print: false, template: bundle.interior.template });
+  return { ok: true, session: publicSession(updated), pdf: publicPdf(persisted, false) };
 }
 
 async function generatePdf(req: Request, payload: Record<string, unknown>) {
   const row = await findSession(payload);
   await enforceAbuseLimit(req, payload, 'generatePdf', String(row.id));
-  if (!['book_ready', 'pending_review', 'approved', 'released_to_customer', 'blocked'].includes(String(row.status))) {
+  if (!['book_ready', 'pdf_generating', 'pending_review', 'approved', 'released_to_customer', 'blocked'].includes(String(row.status))) {
     throw new Error('Book must be ready before generating PDF');
   }
 
   const manuscript = await latestReadyManuscript(String(row.id));
   if (!manuscript?.id) throw new Error('No ready manuscript found');
 
-  const version = await nextPdfVersion(String(row.id));
   const degraded = manuscriptIsDegraded(manuscript);
+  const source = manuscript.manuscript as Record<string, unknown>;
+  if (source.prompt_version === 'caronte-literary-v2') {
+    if (!printQueueEnabled()) throw new Error('print_queue_disabled');
+    try {
+      const result = await printEngine().enqueue(String(row.id), manuscript);
+      const updated = await findSession(payload);
+      return { ok: true, session: publicSession(updated), job: result.job, pdf: publicPdf(result.pdf, false) };
+    } catch (error) { throw printQueueError(error); }
+  }
+  if (row.status === 'pdf_generating') throw new Error('PDF generation is already active');
+  const version = await nextPdfVersion(String(row.id));
   const pdf = buildPdfDocument(manuscript.manuscript as Record<string, unknown>, String(row.id));
   if (pdf.byteSize > 20_000_000) throw new Error('Generated PDF is too large for private storage');
   const fileName = stablePdfFileName(String(row.id), version);
@@ -3465,14 +3805,20 @@ async function privateStorageDelete(bucket: string, storagePath: unknown) {
 
 async function privacySnapshot(row: Record<string, unknown>) {
   const sessionId = String(row.id);
-  const [answers, artifacts, psychMaps, manuscripts, pdfs, events] = await Promise.all([
+  const [answers, artifacts, psychMaps, manuscripts, pdfs, events, bookJobs] = await Promise.all([
     rest(`future_book_answers?session_id=eq.${encodeParam(sessionId)}&select=question_index,question_text,transcript,transcript_source,duration_seconds,quality_score,metadata,created_at&order=question_index.asc`).catch(() => []),
     rest(`future_book_artifacts?session_id=eq.${encodeParam(sessionId)}&select=artifact_type,provider,mime_type,storage_path,metadata,created_at&order=created_at.asc`).catch(() => []),
     rest(`future_book_psych_maps?session_id=eq.${encodeParam(sessionId)}&select=version,status,prompt_version,quality_report,provider_chain,created_at,updated_at&order=version.asc`).catch(() => []),
     rest(`future_book_manuscripts?session_id=eq.${encodeParam(sessionId)}&select=id,status,title,quality_score,prompt_version,quality_report,provider_chain,created_at,updated_at&order=created_at.asc`).catch(() => []),
     rest(`future_book_pdfs?session_id=eq.${encodeParam(sessionId)}&select=id,version,review_status,file_name,page_count,page_size,storage_path,quality_report,print_validation,lulu_metadata,created_at,updated_at&order=version.asc`).catch(() => []),
-    rest(`future_book_events?session_id=eq.${encodeParam(sessionId)}&select=event_type,metadata,created_at&order=created_at.asc`).catch(() => [])
+    rest(`future_book_events?session_id=eq.${encodeParam(sessionId)}&select=event_type,metadata,created_at&order=created_at.asc`).catch(() => []),
+    rest(`future_book_jobs?session_id=eq.${encodeParam(sessionId)}&select=id,interview,prompt_version,model_config,status,stage,error_code,created_at,updated_at&order=created_at.asc`)
   ]);
+  const bookSteps = [];
+  for (const job of (Array.isArray(bookJobs) ? bookJobs : []) as Array<{ id: string }>) {
+    const steps = await rest(`future_book_job_steps?job_id=eq.${encodeParam(job.id)}&select=step_key,stage,unit_id,status,input_hash,output,diagnostic,created_at,updated_at&order=created_at.asc`);
+    bookSteps.push({ jobId: job.id, steps });
+  }
   return {
     exportedAt: new Date().toISOString(),
     product: 'Futuro Anterior',
@@ -3488,6 +3834,8 @@ async function privacySnapshot(row: Record<string, unknown>) {
     manuscripts: Array.isArray(manuscripts) ? manuscripts : [],
     pdfs: Array.isArray(pdfs) ? pdfs : [],
     events: Array.isArray(events) ? events : [],
+    bookJobs: Array.isArray(bookJobs) ? bookJobs : [],
+    bookSteps,
     note: 'Export RGPD operativo. No incluye claves internas ni binarios PDF/audio; esos artefactos viven en storage privado.'
   };
 }
@@ -3643,6 +3991,7 @@ async function runRetentionSweep(dryRun = true) {
   }
 
   const simpleDeletes = [
+    ['book_jobs', `future_book_jobs?created_at=lt.${encodeParam(retentionCutoff(policies, 'answers').cutoff)}`],
     ['answers', `future_book_answers?created_at=lt.${encodeParam(retentionCutoff(policies, 'answers').cutoff)}`],
     ['manuscripts', `future_book_manuscripts?created_at=lt.${encodeParam(retentionCutoff(policies, 'manuscripts').cutoff)}`],
     ['psych_maps', `future_book_psych_maps?created_at=lt.${encodeParam(retentionCutoff(policies, 'psych_maps').cutoff)}`],
@@ -3651,7 +4000,7 @@ async function runRetentionSweep(dryRun = true) {
     ['sessions', `future_book_sessions?status=in.(released_to_customer,failed,blocked)&updated_at=lt.${encodeParam(retentionCutoff(policies, 'answers').cutoff)}`]
   ];
   for (const [dataType, path] of simpleDeletes) {
-    const policy = retentionCutoff(policies, dataType === 'sessions' ? 'answers' : dataType);
+    const policy = retentionCutoff(policies, ['sessions', 'book_jobs'].includes(dataType) ? 'answers' : dataType);
     if (!policy.enabled) continue;
     const rows = await selectRetentionRows(path);
     if (!dryRun) await deleteRetentionRows(path);
@@ -3694,9 +4043,12 @@ async function providerStatus() {
   const settings = new Map((Array.isArray(rows) ? rows : []).map((row) => [String(row.provider), row]));
   return Promise.all(providerDefinitions().map(async (definition) => {
     const row = settings.get(definition.provider) as Record<string, unknown> | undefined;
+    const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : {};
+    if (definition.provider === 'lulu') {
+      return luluCredentialStore().status();
+    }
     const envConfigured = definition.env.some((name) => Boolean(Deno.env.get(name)));
     const configured = Boolean(await providerSecret(definition.provider));
-    const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : {};
     return {
       provider: definition.provider,
       displayName: definition.displayName,
@@ -4209,9 +4561,14 @@ async function requireFutureBookMonitorCaller(req: Request, payload: Record<stri
 
 async function adminDashboard(req: Request, payload: Record<string, unknown>) {
   const admin = await requireFutureBookAdmin(req, payload, 'adminDashboard');
+  const [bookJobs, bookSettings, printJobs] = await Promise.all([
+    rest('future_book_jobs?select=id,session_id,status,stage,error_code,created_at,updated_at&order=created_at.desc&limit=100'),
+    bookModelSettings(),
+    printJobsPage({}).catch(() => ({ available:false,errorCode:'print_queue_unavailable',items:null,hasMore:false,nextOffset:null }))
+  ]);
   const [sessionsRaw, pdfsRaw, psychMapsRaw, manuscriptsRaw, answersRaw, auditRaw, abuseRaw, privacyRaw, retentionRaw, syntheticRaw, deadRaw, slaRaw, deliveriesRaw, campaignsRaw, invitesRaw, waitlistRaw, providers] = await Promise.all([
     rest('future_book_sessions?select=id,status,payment_status,price_cents,currency,book_status,pdf_review_status,question_count,access_campaign_id,access_invite_id,created_at,updated_at,interview_started_at,interview_completed_at,book_generation_started_at,book_generation_completed_at,pdf_ready_at,error_code&order=created_at.desc&limit=80'),
-    rest('future_book_pdfs?select=id,session_id,version,review_status,file_name,page_count,page_size,storage_path,quality_report,print_validation,lulu_metadata,reviewed_by,reviewed_at,released_at,created_at,updated_at&order=created_at.desc&limit=80').catch(() => []),
+    rest('future_book_pdfs?select=id,session_id,version,review_status,file_name,page_count,page_size,storage_path,quality_report,print_validation,lulu_metadata,metadata,reviewed_by,reviewed_at,released_at,created_at,updated_at&order=created_at.desc&limit=80').catch(() => []),
     rest('future_book_psych_maps?select=id,session_id,version,status,prompt_version,quality_report,provider_chain,created_at,updated_at&order=created_at.desc&limit=80').catch(() => []),
     rest('future_book_manuscripts?select=id,session_id,status,title,quality_score,prompt_version,provider_chain,quality_report,psych_map_id,created_at,updated_at&order=created_at.desc&limit=80').catch(() => []),
     rest('future_book_answers?select=id,session_id,transcript_source,duration_seconds,quality_score,metadata,created_at&order=created_at.desc&limit=300').catch(() => []),
@@ -4260,6 +4617,12 @@ async function adminDashboard(req: Request, payload: Record<string, unknown>) {
   return {
     ok: true,
     admin: publicAdminContext(admin),
+    bookJobs,
+    printJobs,
+    bookRuntime: {
+      writerModel: bookSettings.writerModel, reviewerModel: bookSettings.reviewerModel,
+      openaiConfigured: Boolean(bookSettings.openaiKey), anthropicConfigured: Boolean(bookSettings.anthropicKey)
+    },
     metrics,
     monitor: await monitorSnapshot(sessions, pdfs, providers),
     sessions,
@@ -4400,6 +4763,107 @@ async function adminPdf(req: Request, payload: Record<string, unknown>) {
   };
 }
 
+async function printDatabaseRest(resource: string, options: {method?: string; body?: unknown; prefer?: string} = {}) {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('print_database_timeout')), 10000);
+  });
+  try { return await Promise.race([rest(resource, options), deadline]); }
+  finally { clearTimeout(timer!); }
+}
+
+async function readPrintPdf(pdfId: string) {
+  return first(await printDatabaseRest(`future_book_pdfs?id=eq.${encodeParam(pdfId)}&select=*&limit=1`)) as Record<string, unknown> | null;
+}
+
+async function compareAndSetPrintPdf(current: Record<string, unknown>, body: Record<string, unknown>) {
+  if (!current.updated_at) throw new Error('print_row_revision_missing');
+  const changed = first(await printDatabaseRest(`future_book_pdfs?id=eq.${encodeParam(String(current.id))}&updated_at=eq.${encodeParam(String(current.updated_at))}`, {
+    method: 'PATCH', body, prefer: 'return=representation'
+  })) as Record<string, unknown> | null;
+  if (!changed?.id) return null;
+  const confirmed = await readPrintPdf(String(current.id));
+  if (!confirmed || confirmed.updated_at !== changed.updated_at ||
+      Object.keys(body).some(key => printJson(confirmed[key]) !== printJson(body[key]))) throw new Error('print_row_readback_unverified');
+  return confirmed;
+}
+
+async function adminPrintStatus(req: Request, payload: Record<string, unknown>) {
+  await requireFutureBookAdmin(req, payload, 'adminPrintStatus');
+  const pdfId = safeText(payload.pdfId, '', 80);
+  if (!pdfId) throw new Error('Missing pdfId');
+  const pdf = await readPrintPdf(pdfId);
+  if (!pdf) throw new Error('PDF not found');
+  return { ok: true, pdf: publicPdf(pdf, false) };
+}
+
+async function adminValidatePrint(req: Request, payload: Record<string, unknown>) {
+  const admin = await requireFutureBookAdmin(req, payload, 'adminValidatePrint');
+  const pdfId = safeText(payload.pdfId, '', 80);
+  if (!pdfId) throw new Error('Missing pdfId');
+  const credentials = await luluCredentials();
+  if (!credentials.configured) throw new Error('print_lulu_credentials_required');
+  const environment = credentials.environment;
+  const files = createPrintFileAccess({ url: Deno.env.get('SUPABASE_URL') || '', serviceKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '', fetch });
+  const preflight = createPrintPreflight({ environment, read: boundLuluPrintRead(credentials, true), compareAndSet: compareAndSetPrintPdf,
+    ...files, lulu: createLuluPrintClient(credentials) });
+  const pdf = await preflight.run(pdfId);
+  const state = (pdf.print_validation as Record<string, unknown>)?.preflight as Record<string, unknown> | undefined;
+  await auditFutureBookAdmin(req, admin, 'adminValidatePrint', 'future_book_pdf', pdfId, {
+    session_id: pdf.session_id, preflight_status: state?.status || 'pending',
+    ready_for_print: (pdf.lulu_metadata as Record<string, unknown>)?.ready_for_print === true,
+    order_created: false, payment_created: false
+  });
+  return { ok: true, pdf: publicPdf(pdf, false) };
+}
+
+async function adminPrintQuotation(req: Request, payload: Record<string, unknown>, action: string) {
+  if (!['adminPrintQuote', 'adminQuotePrint', 'adminShippingOptions'].includes(action)) throw new Error('print_quote_action_invalid');
+  const admin = await requireFutureBookAdmin(req, payload, action);
+  const pdfId = safeText(payload.pdfId, '', 80);
+  if (!pdfId) throw new Error('Missing pdfId');
+  const credentials = await luluCredentials();
+  if (!credentials.configured) throw new Error('print_lulu_credentials_required');
+  const service = createPrintQuotation({ read: boundLuluPrintRead(credentials), compareAndSet: compareAndSetPrintPdf,
+    protectAddress: (address: Record<string, unknown>) => encryptedSecret(printJson(address)),
+    addressHash: (address: Record<string, unknown>) => privacyHash(printJson(address)),
+    lulu: createLuluPrintClient(credentials) });
+  if (action === 'adminPrintQuote') return { ok: true, quotation: await service.status(pdfId) };
+  const input = { shippingAddress: payload.shippingAddress, shippingConsent: payload.shippingConsent,
+    currency: payload.currency, shippingLevel: payload.shippingLevel };
+  if (action === 'adminShippingOptions') return { ok: true, ...(await service.shippingOptions(pdfId, input)) };
+  const quotation = await service.quote(pdfId, input);
+  await auditFutureBookAdmin(req, admin, action, 'future_book_pdf', pdfId, {
+    quote_id: quotation.id || null, quote_status: quotation.status, order_created: false, payment_created: false
+  });
+  return { ok: true, quotation };
+}
+
+async function adminPrintOrder(req: Request, payload: Record<string, unknown>, action: string) {
+  if (!['adminPrintOrder', 'adminApprovePrintOrder', 'adminSubmitPrintOrder', 'adminSyncPrintOrder', 'adminReconcilePrintOrder'].includes(action)) throw new Error('print_order_action_invalid');
+  const admin = await requireFutureBookAdmin(req, payload, action);
+  const enabled = Deno.env.get('FUTURE_BOOK_LULU_ORDERS_ENABLED') === 'true';
+  if (action === 'adminSubmitPrintOrder' && !enabled) throw new Error('print_order_dispatch_disabled');
+  const pdfId = safeText(payload.pdfId, '', 80), credentials = await luluCredentials();
+  if (!pdfId) throw new Error('Missing pdfId');
+  if (!credentials.configured) throw new Error('print_lulu_credentials_required');
+  const access = createPrintFileAccess({ url: supabaseUrl, serviceKey: serviceRoleKey });
+  const service = createPrintOrder({ read: boundLuluPrintRead(credentials), compareAndSet: compareAndSetPrintPdf,
+    decryptAddress: async (value: { ciphertext: string; nonce: string }) => JSON.parse(await decryptSecret(value.ciphertext, value.nonce)),
+    addressHash: (address: Record<string, unknown>) => privacyHash(printJson(address)),
+    verifyFile: access.verifyFile, signFile: access.signFile, lulu: createLuluPrintClient(credentials) });
+  let order;
+  if (action === 'adminPrintOrder') order = await service.status(pdfId);
+  else if (action === 'adminApprovePrintOrder') order = await service.approve(pdfId, payload,
+    { id: admin.userId || admin.adminUserId || admin.email || admin.label, role: admin.role });
+  else if (action === 'adminSubmitPrintOrder') order = await service.submit(pdfId, safeText(payload.orderId, '', 255));
+  else if (action === 'adminSyncPrintOrder') order = await service.sync(pdfId);
+  else order = await service.reconcile(pdfId);
+  if (action !== 'adminPrintOrder') await auditFutureBookAdmin(req, admin, action, 'future_book_pdf', pdfId,
+    { order_id: order.id || null, state: order.state, provider_id: order.providerId || null });
+  return { ok: true, order: { ...order, submissionEnabled: enabled, canSubmit: enabled && order.canSubmit } };
+}
+
 function reviewActionForStatus(reviewStatus: string) {
   if (reviewStatus === 'approved') return 'adminApprovePdf';
   if (reviewStatus === 'rejected') return 'adminRejectPdf';
@@ -4426,13 +4890,20 @@ async function patchPdfReview(req: Request, payload: Record<string, unknown>, re
     reviewed_at: now
   };
   if (reviewStatus === 'released_to_customer') body.released_at = now;
-
-  const updated = first(await rest(`future_book_pdfs?id=eq.${encodeParam(pdfId)}`, {
-    method: 'PATCH',
-    body,
-    prefer: 'return=representation'
-  })) as Record<string, unknown> | null;
-  if (!updated?.id) throw new Error('Could not update PDF');
+  const validation = current.print_validation as Record<string, unknown> | undefined;
+  if ((current.metadata as Record<string, unknown>)?.template === 'caronte-a5-embedded-v2' && reviewStatus !== 'released_to_customer') {
+    const approval = reviewStatus === 'approved' ? { reviewer: admin.label, at: now, version: current.version,
+      source_sha256: validation?.source_sha256, interior_sha256: validation?.interior_sha256, cover_sha256: validation?.cover_sha256 } : null;
+    body.print_validation = { ...validation, ready_for_print: false, human_editorial_review: reviewStatus,
+      editorial_approval: approval,
+      ...(validation?.preflight ? { preflight: { ...(validation.preflight as Record<string, unknown>), status: 'approval_required' } } : {}) };
+    body.lulu_metadata = { ...(current.lulu_metadata as Record<string, unknown>), ready_for_print: false,
+      ready_for_print_status: reviewStatus === 'approved' ? 'pending_external_preflight' : 'approval_required', send_to_lulu: false };
+  }
+  let updated: Record<string, unknown> | null;
+  try { updated = await compareAndSetPrintPdf(current, body); }
+  catch { throw new Error('print_review_persistence_unverified'); }
+  if (!updated?.id) throw new Error('print_review_persistence_unverified');
 
   const sessionStatus = reviewStatus === 'approved'
     ? 'approved'
@@ -4502,7 +4973,7 @@ async function adminSessionDetail(req: Request, payload: Record<string, unknown>
     rest(`future_book_artifacts?session_id=eq.${encodeParam(sessionId)}&select=*&order=created_at.desc&limit=120`).catch(() => []),
     rest(`future_book_psych_maps?session_id=eq.${encodeParam(sessionId)}&select=*&order=version.desc&limit=20`).catch(() => []),
     rest(`future_book_manuscripts?session_id=eq.${encodeParam(sessionId)}&select=id,session_id,status,title,quality_score,prompt_version,provider_chain,quality_report,psych_map_id,created_at,updated_at&order=created_at.desc&limit=20`).catch(() => []),
-    rest(`future_book_pdfs?session_id=eq.${encodeParam(sessionId)}&select=id,session_id,version,review_status,file_name,page_count,page_size,storage_path,quality_report,print_validation,lulu_metadata,reviewed_by,reviewed_at,released_at,created_at,updated_at&order=version.desc&limit=20`).catch(() => []),
+    rest(`future_book_pdfs?session_id=eq.${encodeParam(sessionId)}&select=id,session_id,version,review_status,file_name,page_count,page_size,storage_path,quality_report,print_validation,lulu_metadata,metadata,reviewed_by,reviewed_at,released_at,created_at,updated_at&order=version.desc&limit=20`).catch(() => []),
     rest(`future_book_admin_audit_events?resource_id=eq.${encodeParam(sessionId)}&select=*&order=created_at.desc&limit=80`).catch(() => [])
   ]);
   const session = first(sessionRaw as Array<Record<string, unknown>>) as Record<string, unknown> | null;
@@ -5038,6 +5509,7 @@ async function adminSaveProviderKey(req: Request, payload: Record<string, unknow
   const apiKey = safeLongText(payload.apiKey, '', 4000);
   const definition = providerDefinitions().find((item) => item.provider === provider);
   if (!definition) throw new Error('Unknown provider');
+  if (provider === 'lulu') throw new Error('Lulu requires a private server-side OAuth pair; the legacy one-key setting is not accepted');
   if (!apiKey) throw new Error('Missing apiKey');
   const encrypted = await encryptedSecret(apiKey);
   const row = first(await rest('future_book_provider_settings?on_conflict=provider', {
@@ -5092,13 +5564,80 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 8
   }
 }
 
+async function luluConfigurationTag(value: string) {
+  const salt = Deno.env.get('FUTURE_BOOK_PRIVACY_SALT') || Deno.env.get('FUTURE_BOOK_SECRET_KEY')
+    || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+  if (!salt || typeof value !== 'string' || !value || value.length > 8192) {
+    throw new Error('lulu_oauth_identity_unavailable');
+  }
+  // Hash the complete validated pair. The generic privacy helper truncates text.
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(salt),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return bytesToHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value)));
+}
+
+function luluCredentialStore() {
+  return createLuluCredentialStore({ env: (name: string) => Deno.env.get(name),
+    read: async () => first(await rest('future_book_provider_settings?provider=eq.lulu&select=*&limit=1')),
+    persist: async (before: Record<string, unknown> | null, body: Record<string, unknown>) => {
+      if (before && !before.updated_at) throw new Error('lulu_oauth_revision_required');
+      const resource = before
+        ? `future_book_provider_settings?provider=eq.lulu&updated_at=eq.${encodeParam(before.updated_at)}`
+        : 'future_book_provider_settings?on_conflict=provider';
+      return first(await rest(resource, { method: before ? 'PATCH' : 'POST', body,
+        prefer: before ? 'return=representation' : 'resolution=ignore-duplicates,return=representation' }));
+    },
+    encrypt: async (value: string) => {
+      if (!Deno.env.get('FUTURE_BOOK_SECRET_KEY')) throw new Error('lulu_oauth_encryption_required');
+      return encryptedSecret(value);
+    }, decrypt: decryptSecret, fingerprint: luluConfigurationTag,
+    authenticate: (credentials: Record<string, unknown>) => createLuluPrintClient(credentials).authenticate() });
+}
+
+async function luluCredentials() {
+  return luluCredentialStore().resolve();
+}
+
+function boundLuluPrintRead(credentials: { environment: string; configurationTag: string }, allowInitialBinding = false) {
+  return async (pdfId: string) => {
+    const row = await readPrintPdf(pdfId);
+    if (!row) return null;
+    const metadata = (row.metadata || {}) as Record<string, unknown>;
+    const tag = metadata.lulu_credential_tag;
+    if (tag && tag !== credentials.configurationTag) throw new Error('print_lulu_configuration_changed');
+    if (!tag && ((row.print_validation as Record<string, unknown>)?.preflight || metadata.print_quote || metadata.print_order)) {
+      throw new Error('print_lulu_configuration_binding_required');
+    }
+    if (!tag && allowInitialBinding) {
+      printArtifactBinding(row, credentials.environment);
+      const saved = await compareAndSetPrintPdf(row, { metadata: { ...metadata, lulu_credential_tag: credentials.configurationTag } });
+      if (!saved || (saved.metadata as Record<string, unknown>)?.lulu_credential_tag !== credentials.configurationTag) {
+        throw new Error('print_lulu_configuration_binding_unverified');
+      }
+      return saved;
+    }
+    return row;
+  };
+}
+
+async function adminSaveLuluCredentials(req: Request, payload: Record<string, unknown>) {
+  const admin = await requireFutureBookAdmin(req, payload, 'adminSaveLuluCredentials');
+  const provider = await luluCredentialStore().save({ environment: payload.environment,
+    clientKey: payload.clientKey, clientSecret: payload.clientSecret, configurationId: payload.configurationId,
+    expectedRevision: payload.expectedRevision, saveConsent: payload.saveConsent }, admin);
+  await auditFutureBookAdmin(req, admin, 'adminSaveLuluCredentials', 'future_book_provider_setting', 'lulu',
+    { environment: provider.environment, configuration_id: provider.configurationId, oauth_tested: false, order_created: false });
+  return { ok: true, provider };
+}
+
 async function testProviderConnectivity(provider: string) {
   if (provider === 'lulu') {
-    return {
-      ok: true,
-      status: 'placeholder',
-      detail: 'lulu_placeholder_no_live_call'
-    };
+    const credentials = await luluCredentials();
+    if (!credentials.configured) return { ok: false, status: 'not_configured', detail: 'missing_lulu_oauth_pair' };
+    try {
+      await createLuluPrintClient(credentials).authenticate();
+      return { ok: true, status: 'configured', detail: `lulu_oauth_ok:${credentials.environment}` };
+    } catch { return { ok: false, status: 'failed', detail: 'lulu_oauth_failed' }; }
   }
 
   const apiKey = await providerSecret(provider);
@@ -5186,7 +5725,13 @@ async function adminTestProvider(req: Request, payload: Record<string, unknown>)
   const provider = safeText(payload.provider, '', 40);
   const definition = providerDefinitions().find((item) => item.provider === provider);
   if (!definition) throw new Error('Unknown provider');
-  const hasSecret = provider === 'lulu' || Boolean(await providerSecret(provider));
+  if (provider === 'lulu') {
+    const result = await luluCredentialStore().probe(admin);
+    await auditFutureBookAdmin(req, admin, 'adminTestProvider', 'future_book_provider_setting', 'lulu',
+      { environment: result.environment, result_status: result.testStatus, live_probe_ok: result.liveProbeOk, order_created: false });
+    return { ok: true, provider: result };
+  }
+  const hasSecret = Boolean(await providerSecret(provider));
   const result = await testProviderConnectivity(provider);
   const resultAny = result as Record<string, unknown>;
   const now = new Date().toISOString();
@@ -5309,6 +5854,10 @@ Deno.serve(async (req) => {
       return jsonResponse(req, await generateBook(req, payload));
     }
 
+    if (action === 'advanceBook') {
+      return jsonResponse(req, await advanceBook(req, payload));
+    }
+
     if (action === 'getBookStatus') {
       return jsonResponse(req, await getBookStatus(payload));
     }
@@ -5319,6 +5868,10 @@ Deno.serve(async (req) => {
 
     if (action === 'getPdfStatus') {
       return jsonResponse(req, await getPdfStatus(payload));
+    }
+
+    if (action === 'advancePrint') {
+      return jsonResponse(req, await advancePrint(req, payload));
     }
 
     if (action === 'downloadReleasedPdf') {
@@ -5347,6 +5900,18 @@ Deno.serve(async (req) => {
       return jsonResponse(req, await adminDashboard(req, payload));
     }
 
+    if (action === 'adminBookJob') {
+      return jsonResponse(req, await adminBookJob(req, payload));
+    }
+
+    if (action === 'adminPrintJobs') return jsonResponse(req,await adminPrintJobs(req,payload));
+    if (action === 'adminPrintJob') return jsonResponse(req,await adminPrintJob(req,payload));
+    if (action === 'adminResumePrint' || action === 'adminCancelPrint') return jsonResponse(req,await adminChangePrintJob(req,payload,action));
+
+    if (action === 'adminResumeBook' || action === 'adminCancelBook') {
+      return jsonResponse(req, await adminChangeBookJob(req, payload, action));
+    }
+
     if (action === 'adminMonitor') {
       return jsonResponse(req, await adminMonitor(req, payload));
     }
@@ -5361,6 +5926,21 @@ Deno.serve(async (req) => {
 
     if (action === 'adminPdf') {
       return jsonResponse(req, await adminPdf(req, payload));
+    }
+
+    if (action === 'adminPrintStatus') {
+      return jsonResponse(req, await adminPrintStatus(req, payload));
+    }
+
+    if (action === 'adminValidatePrint') {
+      return jsonResponse(req, await adminValidatePrint(req, payload));
+    }
+
+    if (['adminPrintQuote', 'adminQuotePrint', 'adminShippingOptions'].includes(action)) {
+      return jsonResponse(req, await adminPrintQuotation(req, payload, action));
+    }
+    if (['adminPrintOrder', 'adminApprovePrintOrder', 'adminSubmitPrintOrder', 'adminSyncPrintOrder', 'adminReconcilePrintOrder'].includes(action)) {
+      return jsonResponse(req, await adminPrintOrder(req, payload, action));
     }
 
     if (action === 'adminSessionDetail') {
@@ -5441,6 +6021,10 @@ Deno.serve(async (req) => {
 
     if (action === 'adminSaveProviderKey') {
       return jsonResponse(req, await adminSaveProviderKey(req, payload));
+    }
+
+    if (action === 'adminSaveLuluCredentials') {
+      return jsonResponse(req, await adminSaveLuluCredentials(req, payload));
     }
 
     if (action === 'adminTestProvider') {

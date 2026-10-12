@@ -2,12 +2,6 @@ import { callFunction, clearSession, getStoredUser, signIn, signOut } from './ap
 import { hasBackendConfig } from './config.js';
 
 const ADMIN_TOKEN_KEY = 'future_book_admin_token';
-const SESSION_KEY = 'future_book_sprint3_session';
-const MANUSCRIPT_KEY = 'future_book_sprint4_manuscript';
-const PDF_KEY = 'future_book_sprint5_pdf';
-const PROVIDERS_KEY = 'future_book_sprint5_providers';
-const SHOWCASE_DISABLE_PARAM = 'real';
-const SHOWCASE_MAX_ROWS = 14;
 
 const tokenForm = document.querySelector('#adminTokenForm');
 const tokenInput = document.querySelector('#adminTokenInput');
@@ -20,7 +14,6 @@ const adminStatus = document.querySelector('#adminStatus');
 const adminIdentity = document.querySelector('#adminIdentity');
 const refreshButton = document.querySelector('#refreshAdminButton');
 const adminLogoutButton = document.querySelector('#adminLogoutButton');
-const demoBanner = document.querySelector('#demoBanner');
 const opsHeadline = document.querySelector('#opsHeadline');
 const opsSubline = document.querySelector('#opsSubline');
 const opsSnapshot = document.querySelector('#opsSnapshot');
@@ -76,58 +69,70 @@ const sessionDetail = document.querySelector('#sessionDetail');
 const caronteBody = document.querySelector('#caronteBody');
 const manuscriptBody = document.querySelector('#manuscriptBody');
 const pdfBody = document.querySelector('#pdfBody');
+const printValidationStatus = document.querySelector('#printValidationStatus');
+const printValidationPending = new Set();
+const printQuotePanel = document.querySelector('#printQuotePanel');
+const printQuoteForm = document.querySelector('#printQuoteForm');
+const printQuoteSummary = document.querySelector('#printQuoteSummary');
+const printQuoteActionStatus = document.querySelector('#printQuoteActionStatus');
+const printQuoteConsent = document.querySelector('#printQuoteConsent');
+const printQuoteCurrency = document.querySelector('#printQuoteCurrency');
+const printShippingLevel = document.querySelector('#printShippingLevel');
+const printShippingOptionsButton = document.querySelector('#printShippingOptionsButton');
+const printQuoteCalculateButton = document.querySelector('#printQuoteCalculateButton');
+const printAddressFields = Object.fromEntries(Object.entries({name:'Name',street1:'Street1',street2:'Street2',city:'City',postcode:'Postcode',country_code:'Country',state_code:'State',phone_number:'Phone',email:'Email'})
+  .map(([key,suffix]) => [key,document.querySelector(`#printAddress${suffix}`)]));
+let selectedPrintPdfId = '', selectedPrintBinding = null, printQuoteBusy = false, printShippingFingerprint = null;
+const printPrepareOrderButton = document.querySelector('#printPrepareOrderButton');
+const printOrderPanel = document.querySelector('#printOrderPanel');
+const printOrderSummary = document.querySelector('#printOrderSummary');
+const printOrderActionStatus = document.querySelector('#printOrderActionStatus');
+const printOrderApprovalForm = document.querySelector('#printOrderApprovalForm');
+const printOrderAmount = document.querySelector('#printOrderAmount');
+const printOrderConsent = document.querySelector('#printOrderConsent');
+const printManualPaymentConsent = document.querySelector('#printManualPaymentConsent');
+const printPaymentPortal = document.querySelector('#printPaymentPortal');
+const printOrderButtons = Object.fromEntries(['Approve','Submit','Status','Sync','Reconcile'].map(kind=>[kind.toLowerCase(),document.querySelector(`#printOrder${kind}Button`)]));
+let lastPrintQuotation = null, confirmedPrintQuoteInput = null, selectedPrintOrderPdfId = '', selectedPrintOrder = null, printOrderBusy = false;
 const pdfPreview = document.querySelector('#pdfPreview');
+const coverPdfLink = document.querySelector('#coverPdfLink');
 const previewMeta = document.querySelector('#previewMeta');
 const adminAuditBody = document.querySelector('#adminAuditBody');
+const bookJobsBody = document.querySelector('#bookJobsBody');
+const bookJobStepsBody = document.querySelector('#bookJobStepsBody');
+const bookJobSummary = document.querySelector('#bookJobSummary');
+const bookRuntimeStatus = document.querySelector('#bookRuntimeStatus');
+const bookJobReasonInput = document.querySelector('#bookJobReasonInput');
+const bookJobActionStatus = document.querySelector('#bookJobActionStatus');
+const resumeBookButton = document.querySelector('#resumeBookButton');
+const cancelBookButton = document.querySelector('#cancelBookButton');
+const printJobsBody = document.querySelector('#printJobsBody');
+const printJobStepsBody = document.querySelector('#printJobStepsBody');
+const printJobSummary = document.querySelector('#printJobSummary');
+const printJobReasonInput = document.querySelector('#printJobReasonInput');
+const printJobActionStatus = document.querySelector('#printJobActionStatus');
+const resumePrintButton = document.querySelector('#resumePrintButton');
+const cancelPrintButton = document.querySelector('#cancelPrintButton');
+const morePrintJobsButton = document.querySelector('#morePrintJobsButton');
+let selectedPrintJobId = '', selectedPrintJobDetail = null, printJobBusy = false, printJobUnconfirmed = false;
+let printJobsPageState = null, printJobsPageBusy = false;
 
 let adminToken = sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
 let selectedSessionId = '';
 let latestDashboardData = null;
+let selectedBookJobId = '';
+let bookJobActionPending = false;
+let selectedBookJobDetail = null;
 
 function setText(node, value) {
   if (node) node.textContent = value;
 }
 
-function readJson(key, fallback = null) {
-  try {
-    return JSON.parse(sessionStorage.getItem(key) || localStorage.getItem(key) || 'null') ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(key, value, storage = sessionStorage) {
-  storage.setItem(key, JSON.stringify(value));
-}
 
 function shortId(value) {
   return String(value || '').slice(0, 8) || 'local';
 }
 
-function showcaseDataEnabled() {
-  try {
-    return new URLSearchParams(window.location.search).get(SHOWCASE_DISABLE_PARAM) !== '1';
-  } catch {
-    return true;
-  }
-}
-
-function isShowcaseItem(item) {
-  return item?.showcase === true || String(item?.id || item?.sessionId || item?.session_id || '').startsWith('show-');
-}
-
-function mergeShowcaseRows(realRows = [], showcaseRows = [], maxRows = SHOWCASE_MAX_ROWS) {
-  const rows = [...(realRows || []), ...(showcaseRows || [])];
-  const seen = new Set();
-  const merged = [];
-  for (const [index, row] of rows.entries()) {
-    const key = String(row?.id || row?.sessionId || row?.session_id || row?.tokenHint || row?.token_hint || `row-${index}`);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(row);
-  }
-  return merged.slice(0, maxRows);
-}
 
 function escapeHtml(value) {
   const entities = {
@@ -163,9 +168,28 @@ function statusText(value) {
     approved: 'Aprobado',
     rejected: 'Rechazado',
     blocked: 'Bloqueado',
+    queued: 'En cola',
+    running: 'En proceso',
+    cancelled: 'Cancelado',
+    completed: 'Completado',
+    started: 'Preparado',
     regeneration_requested: 'Regeneracion pedida',
     released_to_customer: 'Liberado',
     ready_for_print: 'Listo para imprimir',
+    ready: 'Listo',
+    quoted: 'Presupuesto confirmado',
+    expired: 'Caducado',
+    invalidated: 'Invalidado',
+    not_quoted: 'Sin presupuesto',
+    pending: 'Pendiente',
+    normalized: 'Normalizado',
+    failed: 'Fallido',
+    unknown: 'Sin comprobar',
+    submitting: 'Envío en curso; no repetir',
+    uncertain: 'Conciliación necesaria',
+    binding_changed: 'Archivos modificados; revisión necesaria',
+    approval_required: 'Revisión necesaria',
+    pending_external_preflight: 'Pendiente de Lulu',
     not_ready: 'No listo',
     configured: 'Configurado',
     not_configured: 'Sin configurar',
@@ -223,561 +247,16 @@ function providerOperationalLabel(provider) {
   return labels[provider] || 'Proveedor';
 }
 
-function providerDefaults() {
-  return [
-    { provider: 'elevenlabs', displayName: 'ElevenLabs voz Javier', required: true, voiceName: 'Javier - Mature and Commanding', voiceId: 'PToUZ7lhIUiz1SP94rGo' },
-    { provider: 'openai', displayName: 'GPT-5.4 / OpenAI redaccion', required: true, modelId: 'gpt-5.4-pro' },
-    { provider: 'anthropic', displayName: 'Claude Opus / revision', required: true, modelId: 'claude-opus-4-7' },
-    { provider: 'transcription', displayName: 'Transcripcion backend', required: false },
-    { provider: 'lulu', displayName: 'Lulu print API', required: false, status: 'placeholder' }
-  ];
+
+async function adminAction(action, payload = {}, options = {}) {
+  if (!hasBackendConfig()) throw new Error('backend_not_configured');
+  return callFunction('future-book-session', { action, adminToken, ...payload }, options);
 }
 
-function localProviders() {
-  const saved = readJson(PROVIDERS_KEY, []);
-  return providerDefaults().map((provider) => {
-    const row = saved.find((item) => item.provider === provider.provider);
-    const configured = Boolean(row?.configured);
-    return {
-      ...provider,
-      configured,
-      status: provider.status || (configured ? 'configured' : 'not_configured'),
-      source: configured ? 'local_masked' : 'missing',
-      secretLast4: row?.secretLast4 || null,
-      updatedAt: row?.updatedAt || null,
-      voiceName: row?.voiceName || provider.voiceName || null,
-      voiceId: row?.voiceId || provider.voiceId || null,
-      modelId: row?.modelId || provider.modelId || null
-    };
-  });
-}
-
-function minutesAgo(minutes) {
-  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
-}
-
-function demoSession(id, status, bookStatus, pdfReviewStatus, minutes, source = 'invite_required') {
-  return {
-    id,
-    showcase: true,
-    source,
-    status,
-    bookStatus,
-    pdfReviewStatus,
-    price: { amount: 49.95, cents: 4995, currency: 'EUR' },
-    questionCount: 21,
-    updatedAt: minutesAgo(minutes),
-    createdAt: minutesAgo(minutes + 120)
-  };
-}
-
-function demoDashboard() {
-  const sessions = [
-    demoSession('show-live-4831a2', 'interview_active', 'not_started', 'not_generated', 4),
-    demoSession('show-live-63fa92', 'interview_active', 'not_started', 'not_generated', 7),
-    demoSession('show-ready-09bb21', 'interview_ready', 'not_started', 'not_generated', 11),
-    demoSession('show-book-21bb09', 'interview_completed', 'queued', 'not_generated', 18),
-    demoSession('show-book-34de81', 'interview_completed', 'queued', 'not_generated', 23),
-    demoSession('show-gen-8f4c11', 'book_generating', 'generating', 'not_generated', 29),
-    demoSession('show-gen-18ba7d', 'book_generating', 'generating', 'not_generated', 31),
-    demoSession('show-pdf-62ad90', 'pending_review', 'ready', 'pending_review', 42),
-    demoSession('show-pdf-78dc11', 'pending_review', 'ready', 'pending_review', 49),
-    demoSession('show-ship-f9a003', 'released_to_customer', 'ready', 'released_to_customer', 86),
-    demoSession('show-ship-710ae2', 'released_to_customer', 'ready', 'released_to_customer', 92),
-    demoSession('show-hold-77cc10', 'blocked', 'failed', 'rejected', 128)
-  ];
-  const psychMaps = [
-    { showcase: true, sessionId: 'show-pdf-62ad90', version: 2, promptVersion: 'caronte-literary-v1', status: 'approved', createdAt: minutesAgo(41) },
-    { showcase: true, sessionId: 'show-pdf-78dc11', version: 1, promptVersion: 'caronte-literary-v1', status: 'approved', createdAt: minutesAgo(47) },
-    { showcase: true, sessionId: 'show-ship-f9a003', version: 3, promptVersion: 'caronte-literary-v1', status: 'approved', createdAt: minutesAgo(84) },
-    { showcase: true, sessionId: 'show-ship-710ae2', version: 2, promptVersion: 'caronte-literary-v1', status: 'approved', createdAt: minutesAgo(90) },
-    { showcase: true, sessionId: 'show-gen-8f4c11', version: 1, promptVersion: 'caronte-literary-v1', status: 'quality_review', createdAt: minutesAgo(28) },
-    { showcase: true, sessionId: 'show-gen-18ba7d', version: 1, promptVersion: 'caronte-literary-v1', status: 'quality_review', createdAt: minutesAgo(30) }
-  ];
-  const manuscripts = [
-    { id: 'show-manuscript-01', showcase: true, sessionId: 'show-pdf-62ad90', title: 'El mapa que no sabias que estabas siguiendo', status: 'ready', qualityScore: 0.91, promptVersion: 'caronte-literary-v1', createdAt: minutesAgo(39) },
-    { id: 'show-manuscript-02', showcase: true, sessionId: 'show-ship-f9a003', title: 'Carta desde los cincuenta y ocho', status: 'ready', qualityScore: 0.94, promptVersion: 'caronte-literary-v1', createdAt: minutesAgo(82) },
-    { id: 'show-manuscript-03', showcase: true, sessionId: 'show-gen-8f4c11', title: 'Version beta de un futuro posible', status: 'quality_review', qualityScore: 0.76, promptVersion: 'caronte-literary-v1', createdAt: minutesAgo(24) },
-    { id: 'show-manuscript-04', showcase: true, sessionId: 'show-pdf-78dc11', title: 'Una vida no ejecutada todavia', status: 'ready', qualityScore: 0.89, promptVersion: 'caronte-literary-v1', createdAt: minutesAgo(46) },
-    { id: 'show-manuscript-05', showcase: true, sessionId: 'show-gen-18ba7d', title: 'Los caminos que todavia no has elegido', status: 'quality_review', qualityScore: 0.79, promptVersion: 'caronte-literary-v1', createdAt: minutesAgo(27) }
-  ];
-  const pdfs = [
-    { id: 'show-pdf-01', showcase: true, sessionId: 'show-pdf-62ad90', fileName: 'futuro-anterior-62ad90-v02.pdf', reviewStatus: 'pending_review', pageCount: 118, createdAt: minutesAgo(35), luluMetadata: { ready_for_print: true, send_to_lulu: false, status: 'ready_for_print' } },
-    { id: 'show-pdf-02', showcase: true, sessionId: 'show-ship-f9a003', fileName: 'futuro-anterior-f9a003-v03.pdf', reviewStatus: 'released_to_customer', pageCount: 124, createdAt: minutesAgo(78), luluMetadata: { ready_for_print: true, send_to_lulu: false, status: 'in_transit' } },
-    { id: 'show-pdf-03', showcase: true, sessionId: 'show-hold-77cc10', fileName: 'futuro-anterior-77cc10-v01.pdf', reviewStatus: 'rejected', pageCount: 109, createdAt: minutesAgo(121), luluMetadata: { ready_for_print: false, send_to_lulu: false, status: 'blocked' } },
-    { id: 'show-pdf-04', showcase: true, sessionId: 'show-pdf-78dc11', fileName: 'futuro-anterior-78dc11-v01.pdf', reviewStatus: 'pending_review', pageCount: 132, createdAt: minutesAgo(44), luluMetadata: { ready_for_print: true, send_to_lulu: false, status: 'ready_for_print' } },
-    { id: 'show-pdf-05', showcase: true, sessionId: 'show-ship-710ae2', fileName: 'futuro-anterior-710ae2-v02.pdf', reviewStatus: 'approved', pageCount: 127, createdAt: minutesAgo(88), luluMetadata: { ready_for_print: true, send_to_lulu: false, status: 'shipped' } }
-  ];
-  const providers = providerDefaults().map((provider) => ({
-    ...provider,
-    showcase: true,
-    configured: true,
-    status: provider.status || 'configured',
-    source: 'demo_masked',
-    secretLast4: provider.provider === 'elevenlabs' ? '947' : provider.provider === 'openai' ? 'g5p4' : provider.provider === 'anthropic' ? 'op47' : provider.provider === 'lulu' ? 'lulu' : 'stt9',
-    testStatus: provider.provider === 'lulu' ? 'placeholder' : 'configured',
-    testDetail: provider.provider === 'elevenlabs' ? 'voice_endpoint_ok:Javier - Mature and Commanding' : 'endpoint_ok',
-    updatedAt: minutesAgo(9)
-  }));
-  return {
-    demoMode: true,
-    metrics: {
-      activeSessions: 14,
-      interviewing: 2,
-      waitingBook: 7,
-      booksGenerating: 12,
-      caronteMaps: 267,
-      pdfPendingReview: 8,
-      pdfApproved: 224,
-      pdfBlocked: 2,
-      errors: 1,
-      booksDone: 224,
-      inTransit: 9,
-      webVisitors: 38
-    },
-    monitor: {
-      access: { disabled: false, source: 'demo', updated_at: minutesAgo(12) },
-      averagesSeconds: { interview: 3198, bookGeneration: 146, pdfAfterBook: 41 },
-      p0: { failedSessions: 2, missingRequiredProviders: 0, stalePendingPdfs: 1 },
-      alerts: [{ severity: 'warning', message: 'pdf review queue above normal' }]
-    },
-    sessions,
-    psychMaps,
-    manuscripts,
-    pdfs,
-    costs: {
-      priceEur: 49.95,
-      sessionsInWindow: 238,
-      paidOrApprovedSessions: 224,
-      grossRevenueEur: 11188.8,
-      answersCaptured: 4986,
-      providerCallsApprox: 892,
-      manuscriptsGenerated: 236,
-      pdfsGenerated: 224,
-      pendingEditorialCostDrivers: 8
-    },
-    security: {
-      abuseBlocked: 68,
-      abuseChallenges: 174,
-      abuseEvents: [{ showcase: true, action: 'createSession', outcome: 'challenge_required' }],
-      privacyRequests: [{ showcase: true, status: 'processed' }, { showcase: true, status: 'queued' }],
-      retentionPolicies: [
-        { data_type: 'audio', ttl_days: 7, enabled: true },
-        { data_type: 'answers', ttl_days: 30, enabled: true },
-        { data_type: 'pdfs', ttl_days: 30, enabled: true },
-        { data_type: 'admin_audit', ttl_days: 365, enabled: true }
-      ]
-    },
-    observability: {
-      latestSynthetic: { status: 'succeeded', duration_ms: 1840 },
-      deadLetters: [
-        { id: 'show-dead-01', showcase: true, sessionId: 'show-hold-77cc10', failedAction: 'review_pdf', severity: 'warning', status: 'open', createdAt: minutesAgo(53) },
-        { id: 'show-dead-02', showcase: true, sessionId: 'show-gen-18ba7d', failedAction: 'book_generation_retry', severity: 'info', status: 'retrying', createdAt: minutesAgo(16) }
-      ],
-      deadLetterOpen: 2,
-      latestSla: { sla: { health: 'watch' }, conversion: { rates: { released: 0.68, bookReady: 0.91 } }, cost: { anomaly: { anomaly: false, reason: 'normal' } } },
-      alertDeliveries: [{ showcase: true, status: 'delivered' }],
-      stuckNow: [{ showcase: true, sessionId: 'show-pdf-62ad90', reason: 'human_review_pending' }]
-    },
-    viralAccess: {
-      policy: { mode: 'invite_required', fixedBetaEnabled: false, campaignCode: 'caronte_abril', waitlistEnabled: true },
-      campaigns: [
-        { id: 'show-campaign-01', showcase: true, code: 'caronte_abril', name: 'Caronte abril', status: 'active', accessMode: 'invite_required', usedSessions: 142, maxSessions: 220 },
-        { id: 'show-campaign-02', showcase: true, code: 'marcos_singapur', name: 'Seed novela', status: 'active', accessMode: 'invite_required', usedSessions: 82, maxSessions: 140 },
-        { id: 'show-campaign-03', showcase: true, code: 'founders_49', name: 'Founders 49', status: 'paused', accessMode: 'invite_required', usedSessions: 0, maxSessions: 60 }
-      ],
-      invites: [
-        { id: 'show-invite-01', showcase: true, campaignId: 'show-campaign-01', tokenHint: '4F9A91C0', status: 'active', useCount: 0, maxUses: 1, expiresAt: minutesAgo(-42) },
-        { id: 'show-invite-02', showcase: true, campaignId: 'show-campaign-01', tokenHint: '02AD1F8B', status: 'used', useCount: 1, maxUses: 1, expiresAt: minutesAgo(12) },
-        { id: 'show-invite-03', showcase: true, campaignId: 'show-campaign-02', tokenHint: '8C4D10AE', status: 'active', useCount: 0, maxUses: 1, expiresAt: minutesAgo(-118) },
-        { id: 'show-invite-04', showcase: true, campaignId: 'show-campaign-02', tokenHint: 'A019DE77', status: 'expired', useCount: 0, maxUses: 1, expiresAt: minutesAgo(240) }
-      ],
-      waitlistEntries: [{ id: 'show-wait-01', showcase: true }, { id: 'show-wait-02', showcase: true }],
-      metrics: { activeCampaigns: 2, openInvites: 41, usedInvites: 224, expiredInvites: 52, waitlistQueued: 86 }
-    },
-    auditEvents: [
-      { showcase: true, createdAt: minutesAgo(12), adminEmail: 'future_book_admin', adminRole: 'ops', action: 'adminTestProvider', resource_type: 'provider', resource_id: 'elevenlabs' },
-      { showcase: true, createdAt: minutesAgo(38), adminEmail: 'future_book_admin', adminRole: 'editor', action: 'adminApprovePdf', resource_type: 'future_book_pdf', resource_id: 'show-pdf-02' },
-      { showcase: true, createdAt: minutesAgo(58), adminEmail: 'future_book_admin', adminRole: 'ops', action: 'adminRunAutonomousMonitor', resource_type: 'monitor', resource_id: 'sla' },
-      { showcase: true, createdAt: minutesAgo(71), adminEmail: 'future_book_admin', adminRole: 'editor', action: 'adminReleasePdf', resource_type: 'future_book_pdf', resource_id: 'show-pdf-05' }
-    ],
-    providers,
-    refreshedAt: new Date().toISOString()
-  };
-}
-
-function dashboardIsEmpty(data) {
-  return ![
-    data?.sessions,
-    data?.psychMaps,
-    data?.manuscripts,
-    data?.pdfs,
-    data?.observability?.deadLetters,
-    data?.viralAccess?.campaigns,
-    data?.viralAccess?.invites
-  ].some((items) => Array.isArray(items) && items.length);
-}
-
-function mergeMetricBlock(real = {}, showcase = {}) {
-  const result = { ...showcase, ...real };
-  for (const key of Object.keys(showcase || {})) {
-    if (typeof showcase[key] === 'number' && typeof real?.[key] === 'number') {
-      result[key] = Math.max(showcase[key], real[key]);
-    }
-  }
-  return result;
-}
-
-function mergeShowcaseProviders(realProviders = [], showcaseProviders = []) {
-  const defaults = providerDefaults();
-  const providerIds = [
-    ...new Set([
-      ...defaults.map((item) => item.provider),
-      ...(showcaseProviders || []).map((item) => item.provider),
-      ...(realProviders || []).map((item) => item.provider)
-    ].filter(Boolean))
-  ];
-  return providerIds.map((providerId) => {
-    const defaultsRow = defaults.find((item) => item.provider === providerId) || {};
-    const showcaseRow = (showcaseProviders || []).find((item) => item.provider === providerId) || {};
-    const realRow = (realProviders || []).find((item) => item.provider === providerId) || {};
-    const realConfigured = realRow.configured === true;
-    return {
-      ...defaultsRow,
-      ...showcaseRow,
-      ...realRow,
-      configured: realConfigured || showcaseRow.configured === true,
-      status: realConfigured ? 'configured' : (showcaseRow.status || defaultsRow.status || 'configured'),
-      source: realConfigured ? (realRow.source || 'backend_secret') : (showcaseRow.source || 'demo_masked'),
-      secretLast4: realRow.secretLast4 || realRow.secret_last4 || showcaseRow.secretLast4 || showcaseRow.secret_last4 || null,
-      testStatus: realRow.testStatus || realRow.test_result || showcaseRow.testStatus || 'configured',
-      testDetail: realRow.testDetail || realRow.test_detail || showcaseRow.testDetail || 'endpoint_ok',
-      voiceName: realRow.voiceName || realRow.voice_name || showcaseRow.voiceName || defaultsRow.voiceName || null,
-      voiceId: realRow.voiceId || realRow.voice_id || showcaseRow.voiceId || defaultsRow.voiceId || null,
-      modelId: realRow.modelId || realRow.model_id || showcaseRow.modelId || defaultsRow.modelId || null,
-      updatedAt: realRow.updatedAt || realRow.updated_at || showcaseRow.updatedAt || null,
-      showcase: !realConfigured
-    };
-  });
-}
-
-function enrichDashboard(data) {
-  data = data || {};
-  if (!showcaseDataEnabled()) return { ...data, demoMode: false };
-  const demo = demoDashboard();
-  const providers = mergeShowcaseProviders(data.providers || [], demo.providers);
-  const monitor = data.monitor || {};
-  const security = data.security || {};
-  const observability = data.observability || {};
-  const viralAccess = data.viralAccess || {};
-  return {
-    ...data,
-    demoMode: true,
-    metrics: mergeMetricBlock(data.metrics || {}, demo.metrics),
-    monitor: {
-      ...demo.monitor,
-      ...monitor,
-      access: monitor.access || demo.monitor.access,
-      averagesSeconds: { ...demo.monitor.averagesSeconds, ...(monitor.averagesSeconds || {}) },
-      p0: { ...mergeMetricBlock(monitor.p0 || {}, demo.monitor.p0), missingRequiredProviders: 0 },
-      alerts: mergeShowcaseRows(monitor.alerts || [], demo.monitor.alerts || [], 6)
-    },
-    sessions: mergeShowcaseRows(data.sessions || [], demo.sessions),
-    psychMaps: mergeShowcaseRows(data.psychMaps || [], demo.psychMaps),
-    manuscripts: mergeShowcaseRows(data.manuscripts || [], demo.manuscripts),
-    pdfs: mergeShowcaseRows(data.pdfs || [], demo.pdfs),
-    costs: mergeMetricBlock(data.costs || {}, demo.costs),
-    security: {
-      ...demo.security,
-      ...security,
-      abuseBlocked: Math.max(Number(security.abuseBlocked || 0), demo.security.abuseBlocked),
-      abuseChallenges: Math.max(Number(security.abuseChallenges || 0), demo.security.abuseChallenges),
-      abuseEvents: mergeShowcaseRows(security.abuseEvents || [], demo.security.abuseEvents || [], 8),
-      privacyRequests: mergeShowcaseRows(security.privacyRequests || [], demo.security.privacyRequests || [], 8),
-      retentionPolicies: mergeShowcaseRows(security.retentionPolicies || [], demo.security.retentionPolicies || [], 8)
-    },
-    observability: {
-      ...demo.observability,
-      ...observability,
-      latestSynthetic: observability.latestSynthetic || demo.observability.latestSynthetic,
-      deadLetters: mergeShowcaseRows(observability.deadLetters || [], demo.observability.deadLetters || [], 8),
-      deadLetterOpen: Math.max(Number(observability.deadLetterOpen || 0), demo.observability.deadLetterOpen),
-      latestSla: observability.latestSla || demo.observability.latestSla,
-      alertDeliveries: mergeShowcaseRows(observability.alertDeliveries || [], demo.observability.alertDeliveries || [], 8),
-      stuckNow: mergeShowcaseRows(observability.stuckNow || [], demo.observability.stuckNow || [], 8)
-    },
-    viralAccess: {
-      ...demo.viralAccess,
-      ...viralAccess,
-      policy: { ...demo.viralAccess.policy, ...(viralAccess.policy || {}) },
-      campaigns: mergeShowcaseRows(viralAccess.campaigns || [], demo.viralAccess.campaigns, 8),
-      invites: mergeShowcaseRows(viralAccess.invites || [], demo.viralAccess.invites, 10),
-      waitlistEntries: mergeShowcaseRows(viralAccess.waitlistEntries || [], demo.viralAccess.waitlistEntries, 6),
-      metrics: mergeMetricBlock(viralAccess.metrics || {}, demo.viralAccess.metrics)
-    },
-    auditEvents: mergeShowcaseRows(data.auditEvents || [], demo.auditEvents, 10),
-    providers,
-    refreshedAt: data.refreshedAt || demo.refreshedAt
-  };
-}
-
-function localDashboard() {
-  const session = readJson(SESSION_KEY, null);
-  const pdf = readJson(PDF_KEY, null);
-  const access = readJson('future_book_sprint6_access', { disabled: false, source: 'local' });
-  const sessions = session ? [session] : [];
-  const pdfs = pdf ? [pdf] : [];
-  return {
-    ok: true,
-    admin: {
-      mode: 'local',
-      role: 'local_admin',
-      email: null,
-      label: 'local_admin',
-      permissions: ['*']
-    },
-    metrics: {
-      activeSessions: sessions.filter((item) => ['created', 'payment_pending', 'interview_ready', 'interview_active'].includes(item.status)).length,
-      interviewing: sessions.filter((item) => item.status === 'interview_active').length,
-      waitingBook: sessions.filter((item) => item.status === 'interview_completed').length,
-      booksGenerating: sessions.filter((item) => item.status === 'book_generating').length,
-      caronteMaps: 0,
-      pdfPendingReview: pdfs.filter((item) => item.reviewStatus === 'pending_review').length,
-      pdfApproved: pdfs.filter((item) => item.reviewStatus === 'approved').length,
-      pdfBlocked: pdfs.filter((item) => ['blocked', 'rejected'].includes(item.reviewStatus)).length,
-      errors: 0
-    },
-    monitor: {
-      access,
-      averagesSeconds: {
-        interview: 3600,
-        bookGeneration: 45,
-        pdfAfterBook: 10
-      },
-      p0: {
-        failedSessions: 0,
-        missingRequiredProviders: localProviders().filter((item) => item.required && !item.configured).length,
-        stalePendingPdfs: 0
-      },
-      alerts: []
-    },
-    sessions,
-    psychMaps: [],
-    manuscripts: readJson(MANUSCRIPT_KEY, null) ? [readJson(MANUSCRIPT_KEY, null)] : [],
-    pdfs,
-    costs: {
-      priceEur: 49.95,
-      sessionsInWindow: sessions.length,
-      paidOrApprovedSessions: sessions.length,
-      grossRevenueEur: sessions.length * 49,
-      answersCaptured: 0,
-      providerCallsApprox: 0,
-      manuscriptsGenerated: readJson(MANUSCRIPT_KEY, null) ? 1 : 0,
-      pdfsGenerated: pdfs.length,
-      pendingEditorialCostDrivers: pdfs.filter((item) => item.reviewStatus === 'pending_review').length
-    },
-    security: {
-      abuseBlocked: 0,
-      abuseChallenges: 0,
-      abuseEvents: [],
-      privacyRequests: [],
-      retentionPolicies: [
-        { data_type: 'audio', ttl_days: 7, enabled: true },
-        { data_type: 'answers', ttl_days: 30, enabled: true },
-        { data_type: 'pdfs', ttl_days: 30, enabled: true }
-      ]
-    },
-    observability: {
-      syntheticRuns: [],
-      latestSynthetic: null,
-      deadLetters: [],
-      deadLetterOpen: 0,
-      slaSnapshots: [],
-      latestSla: null,
-      alertDeliveries: [],
-      stuckNow: []
-    },
-    viralAccess: {
-      policy: {
-        mode: 'fixed_beta',
-        fixedBetaEnabled: true,
-        campaignCode: null,
-        waitlistEnabled: true
-      },
-      campaigns: [],
-      invites: [],
-      waitlistEntries: [],
-      metrics: {
-        activeCampaigns: 0,
-        openInvites: 0,
-        usedInvites: 0,
-        expiredInvites: 0,
-        waitlistQueued: 0
-      }
-    },
-    auditEvents: [],
-    providers: localProviders(),
-    refreshedAt: new Date().toISOString()
-  };
-}
-
-async function adminAction(action, payload = {}) {
-  if (!hasBackendConfig()) return localAdminAction(action, payload);
-  return callFunction('future-book-session', { action, adminToken, ...payload });
-}
-
-async function localAdminAction(action, payload = {}) {
-  if (action === 'adminDashboard') return localDashboard();
-  if (action === 'adminPdf') {
-    const pdf = readJson(PDF_KEY, null);
-    if (!pdf) throw new Error('local_pdf_missing');
-    return { ok: true, pdf };
-  }
-  if (action === 'adminSaveProviderKey') {
-    const providers = readJson(PROVIDERS_KEY, []);
-    const next = providers.filter((item) => item.provider !== payload.provider);
-    next.push({
-      provider: payload.provider,
-      configured: true,
-      secretLast4: String(payload.apiKey || '').slice(-4),
-      updatedAt: new Date().toISOString()
-    });
-    writeJson(PROVIDERS_KEY, next, localStorage);
-    return { ok: true };
-  }
-  if (action === 'adminTestProvider') {
-    return { ok: true, provider: { provider: payload.provider, testResult: 'local_only' } };
-  }
-  if (action === 'adminMonitor') return { ok: true, monitor: localDashboard().monitor };
-  if (action === 'adminToggleAccess') {
-    const access = {
-      disabled: payload.disabled === true,
-      source: 'local',
-      reason: payload.reason || '',
-      updated_at: new Date().toISOString()
-    };
-    writeJson('future_book_sprint6_access', access, localStorage);
-    return { ok: true, access };
-  }
-  if (action === 'adminDeleteSessionData') {
-    sessionStorage.removeItem(SESSION_KEY);
-    sessionStorage.removeItem(MANUSCRIPT_KEY);
-    sessionStorage.removeItem(PDF_KEY);
-    return { ok: true, deletedSessionId: payload.sessionId };
-  }
-  if (action === 'adminSessionDetail') {
-    const session = readJson(SESSION_KEY, null);
-    const manuscript = readJson(MANUSCRIPT_KEY, null);
-    const pdf = readJson(PDF_KEY, null);
-    return {
-      ok: true,
-      session: session || { id: payload.sessionId, status: 'local_only' },
-      events: [],
-      answers: [],
-      artifacts: [],
-      psychMaps: [],
-      manuscripts: manuscript ? [manuscript] : [],
-      pdfs: pdf ? [pdf] : [],
-      auditEvents: []
-    };
-  }
-  if (action === 'adminPatchSessionStatus') {
-    const session = readJson(SESSION_KEY, null);
-    const next = {
-      ...(session || { id: payload.sessionId }),
-      status: payload.status || session?.status || 'local_only',
-      bookStatus: payload.bookStatus || session?.bookStatus || 'not_started',
-      pdfReviewStatus: payload.pdfReviewStatus || session?.pdfReviewStatus || 'not_generated',
-      errorCode: payload.clearError ? null : session?.errorCode || null,
-      updatedAt: new Date().toISOString()
-    };
-    writeJson(SESSION_KEY, next);
-    return { ok: true, session: next };
-  }
-  if (action === 'adminRunRetention') {
-    return {
-      ok: true,
-      dryRun: payload.dryRun !== false,
-      summary: {
-        local: {
-          candidates: 0,
-          dry_run: payload.dryRun !== false
-        }
-      }
-    };
-  }
-  if (action === 'adminPrivacyExport') {
-    return { ok: true, export: { session: readJson(SESSION_KEY, null), answers: readJson('future_book_sprint3_answers', []) } };
-  }
-  if (action === 'adminPrivacyErase') {
-    sessionStorage.removeItem(SESSION_KEY);
-    sessionStorage.removeItem(MANUSCRIPT_KEY);
-    sessionStorage.removeItem(PDF_KEY);
-    return { ok: true, erasedSessionId: payload.sessionId };
-  }
-  if (action === 'adminRunSyntheticMonitor') {
-    return { ok: true, run: { status: 'succeeded', probe_type: 'local_light_flow', duration_ms: 0, checks: { local: 'pass' } } };
-  }
-  if (action === 'adminRunAutonomousMonitor') {
-    return { ok: true, stuck: [], costAnomaly: { anomaly: false }, snapshot: { sla: { health: 'local' } } };
-  }
-  if (action === 'adminRetryDeadLetter' || action === 'adminResolveDeadLetter') {
-    return { ok: true, deadLetter: { id: payload.deadLetterId, status: action === 'adminRetryDeadLetter' ? 'resolved' : 'ignored' } };
-  }
-  if (action === 'adminUpdateAccessPolicy') {
-    return { ok: true, policy: payload };
-  }
-  if (action === 'adminCreateAccessCampaign') {
-    return { ok: true, campaign: { id: crypto.randomUUID(), code: payload.code || 'local', name: payload.name || 'local', status: 'active', accessMode: 'invite_required', maxSessions: payload.maxSessions || 100, usedSessions: 0 } };
-  }
-  if (action === 'adminCreateAccessInvites') {
-    const link = new URL('./tiresias.html', window.location.href);
-    link.searchParams.set('k', `local_${crypto.randomUUID().replaceAll('-', '')}`);
-    return { ok: true, invites: [{ token: link.searchParams.get('k'), link: link.toString(), invite: { status: 'active', tokenHint: 'local' } }] };
-  }
-  if (action === 'adminUpdateAccessCampaign' || action === 'adminRevokeAccessInvite') {
-    return { ok: true };
-  }
-  if (['adminApprovePdf', 'adminRejectPdf', 'adminRequestRegeneration', 'adminRegeneratePdf', 'adminReleasePdf'].includes(action)) {
-    const statusByAction = {
-      adminApprovePdf: 'approved',
-      adminRejectPdf: 'rejected',
-      adminRequestRegeneration: 'regeneration_requested',
-      adminRegeneratePdf: 'pending_review',
-      adminReleasePdf: 'released_to_customer'
-    };
-    const pdf = readJson(PDF_KEY, null);
-    if (!pdf) throw new Error('local_pdf_missing');
-    const nextPdf = {
-      ...pdf,
-      id: action === 'adminRegeneratePdf' ? crypto.randomUUID() : pdf.id,
-      version: action === 'adminRegeneratePdf' ? Number(pdf.version || 1) + 1 : pdf.version,
-      fileName: action === 'adminRegeneratePdf'
-        ? `futuro-anterior-${shortId(pdf.sessionId || pdf.session_id || 'local')}-v${String(Number(pdf.version || 1) + 1).padStart(2, '0')}.pdf`
-        : pdf.fileName,
-      reviewStatus: statusByAction[action],
-      reviewNotes: payload.reason || '',
-      reviewedBy: 'local_admin',
-      reviewedAt: new Date().toISOString(),
-      releasedAt: action === 'adminReleasePdf' ? new Date().toISOString() : pdf.releasedAt
-    };
-    writeJson(PDF_KEY, nextPdf);
-    const session = readJson(SESSION_KEY, null);
-    if (session) {
-      writeJson(SESSION_KEY, {
-        ...session,
-        status: action === 'adminReleasePdf' ? 'released_to_customer' : action === 'adminApprovePdf' ? 'approved' : 'pending_review',
-        pdfReviewStatus: nextPdf.reviewStatus
-      });
-    }
-    return { ok: true, pdf: nextPdf };
-  }
-  return { ok: true };
-}
 
 function renderMetrics(metrics) {
   const items = [
-    ['booksDone', 'Libros enviados', 'Liberados a cliente'],
+    ['booksDone', 'PDF entregados', 'Liberados a cliente'],
     ['inTransit', 'En transito', 'Fulfillment'],
     ['webVisitors', 'En web', 'Acceso activo'],
     ['activeSessions', 'Activas', 'Sesiones abiertas'],
@@ -796,7 +275,7 @@ function renderMetrics(metrics) {
     card.className = 'metric';
     card.innerHTML = `
       <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(metrics?.[key] ?? 0)}</strong>
+      <strong>${escapeHtml(metrics?.[key] ?? '—')}</strong>
       <small>${escapeHtml(helper)}</small>
     `;
     metricsGrid.append(card);
@@ -807,20 +286,20 @@ function operationNumbers(data) {
   const sessions = data?.sessions || [];
   const pdfs = data?.pdfs || [];
   const metrics = data?.metrics || {};
-  const doneFromPdfs = pdfs.filter((pdf) => ['approved', 'released_to_customer'].includes(pdfStatus(pdf))).length;
+  const doneFromPdfs = pdfs.filter((pdf) => pdfStatus(pdf) === 'released_to_customer').length;
   const transitFromPdfs = pdfs.filter((pdf) => {
     const lulu = pdf.luluMetadata || pdf.lulu_metadata || {};
-    return ['in_transit', 'shipped', 'ready_for_print'].includes(String(lulu.status || ''));
+    return ['in_transit', 'shipped'].includes(String(lulu.status || ''));
   }).length;
   const webNow = sessions.filter((item) => ['created', 'payment_pending', 'interview_ready', 'interview_active'].includes(item.status)).length;
   return {
     webNow: metrics.webVisitors ?? webNow,
     activeInterviews: metrics.interviewing ?? sessions.filter((item) => item.status === 'interview_active').length,
     inProcess: metrics.booksGenerating ?? sessions.filter((item) => ['interview_completed', 'book_generating', 'pending_review'].includes(item.status)).length,
-    booksDone: metrics.booksDone ?? Math.max(doneFromPdfs, metrics.pdfApproved || 0),
+    booksDone: metrics.booksDone ?? doneFromPdfs,
     inTransit: metrics.inTransit ?? transitFromPdfs,
     pendingReview: metrics.pdfPendingReview ?? pdfs.filter((pdf) => pdfStatus(pdf) === 'pending_review').length,
-    revenue: data?.costs?.grossRevenueEur ?? 0,
+    revenue: data?.costs?.grossRevenueEur ?? '—',
     apiOk: (data?.providers || []).filter((provider) => provider.required && provider.configured).length,
     apiTotal: (data?.providers || []).filter((provider) => provider.required).length
   };
@@ -828,20 +307,17 @@ function operationNumbers(data) {
 
 function renderOperationOverview(data) {
   const ops = operationNumbers(data);
-  if (demoBanner) demoBanner.hidden = data?.demoMode !== true;
-  setText(opsHeadline, `${ops.activeInterviews} entrevistas en curso / ${ops.booksDone} libros enviados / ${ops.inProcess} en proceso`);
-  setText(opsSubline, data?.demoMode
-    ? 'Vista de produccion simulada: datos fake de volumen, mezclados solo en navegador. Para operar real usa ?real=1.'
-    : `Backend sincronizado. Revision pendiente: ${ops.pendingReview}. Ingresos del corte: ${ops.revenue} EUR.`);
+  setText(opsHeadline, `${ops.activeInterviews} entrevistas en curso / ${ops.booksDone} PDF entregados / ${ops.inProcess} en proceso`);
+  setText(opsSubline, `Backend sincronizado. Revision pendiente: ${ops.pendingReview}. Ingresos del corte: ${ops.revenue} EUR.`);
   if (!opsSnapshot) return;
   const items = [
     ['En web', ops.webNow, 'Usuarios y enlaces activos'],
     ['Entrevistas', ops.activeInterviews, 'Voz en curso'],
-    ['Libros enviados', ops.booksDone, 'Liberados a cliente'],
+    ['PDF entregados', ops.booksDone, 'Liberados a cliente'],
     ['En proceso', ops.inProcess, 'Libro/PDF en curso'],
-    ['En transito', ops.inTransit, 'Listos para fulfillment'],
+    ['En transito', ops.inTransit, 'Envíos confirmados'],
     ['Revision', ops.pendingReview, 'PDF esperando humano'],
-    ['APIs', `${ops.apiOk}/${ops.apiTotal}`, 'GPT, Claude, ElevenLabs']
+    ['Claves', `${ops.apiOk}/${ops.apiTotal}`, 'Proveedores configurados']
   ];
   opsSnapshot.innerHTML = '';
   for (const [label, value, helper] of items) {
@@ -864,7 +340,7 @@ function renderAuditChecklist(data) {
     ['ElevenLabs', hasProvider('elevenlabs'), providers.find((item) => item.provider === 'elevenlabs')?.voiceName || 'voz no probada'],
     ['GPT', hasProvider('openai'), providers.find((item) => item.provider === 'openai')?.modelId || 'OpenAI'],
     ['Claude', hasProvider('anthropic'), providers.find((item) => item.provider === 'anthropic')?.modelId || 'Anthropic'],
-    ['PDF manual', Number(data?.metrics?.pdfPendingReview || 0) >= 0, `${data?.metrics?.pdfPendingReview ?? 0} pendientes`],
+    ['PDF manual', Number.isInteger(data?.metrics?.pdfPendingReview), `${data?.metrics?.pdfPendingReview ?? '—'} pendientes`],
     ['Acceso viral', data?.viralAccess?.policy?.mode ? true : false, data?.viralAccess?.policy?.mode || 'sin politica'],
     ['Retencion', (data?.security?.retentionPolicies || []).length > 0, `${(data?.security?.retentionPolicies || []).length} politicas`]
   ];
@@ -883,16 +359,19 @@ function renderAuditChecklist(data) {
 
 function renderMonitor(monitor) {
   if (!monitorGrid) return;
-  const p0Total = Number(monitor?.p0?.failedSessions || 0)
-    + Number(monitor?.p0?.missingRequiredProviders || 0)
-    + Number(monitor?.p0?.stalePendingPdfs || 0);
+  const accessKnown = typeof monitor?.access?.disabled === 'boolean';
+  const p0Counts = ['failedSessions', 'missingRequiredProviders', 'stalePendingPdfs']
+    .map(key => monitor?.p0?.[key]);
+  const p0Total = p0Counts.every(value => Number.isFinite(value))
+    ? p0Counts.reduce((sum, value) => sum + value, 0) : '—';
   const items = [
-    ['Acceso', monitor?.access?.disabled ? 'disabled' : 'open', monitor?.access?.disabled ? 'Cerrado para nuevos usuarios' : 'Disponible'],
+    ['Acceso', accessKnown ? (monitor.access.disabled ? 'disabled' : 'open') : '—',
+      accessKnown ? (monitor.access.disabled ? 'Cerrado para nuevos usuarios' : 'Disponible') : 'Sin información del servidor'],
     ['Alertas P0', p0Total, 'Bloqueos criticos'],
     ['Entrevista media', `${monitor?.averagesSeconds?.interview ?? 'n/a'} s`, 'Tiempo estimado'],
     ['Libro medio', `${monitor?.averagesSeconds?.bookGeneration ?? 'n/a'} s`, 'Generacion IA'],
     ['PDF medio', `${monitor?.averagesSeconds?.pdfAfterBook ?? 'n/a'} s`, 'Postproceso'],
-    ['Alertas abiertas', monitor?.alerts?.length || 0, 'Revisar si sube']
+    ['Alertas abiertas', Array.isArray(monitor?.alerts) ? monitor.alerts.length : '—', 'Revisar si sube']
   ];
   monitorGrid.innerHTML = '';
   for (const [label, value, helper] of items) {
@@ -906,22 +385,24 @@ function renderMonitor(monitor) {
     monitorGrid.append(card);
   }
   if (accessToggleButton) {
-    accessToggleButton.textContent = monitor?.access?.disabled ? 'Reabrir acceso' : 'Cerrar acceso';
-    accessToggleButton.dataset.disabledNow = monitor?.access?.disabled ? 'true' : 'false';
+    accessToggleButton.disabled = !accessKnown;
+    accessToggleButton.textContent = accessKnown ? (monitor.access.disabled ? 'Reabrir acceso' : 'Cerrar acceso') : 'Acceso sin información';
+    if (accessKnown) accessToggleButton.dataset.disabledNow = monitor.access.disabled ? 'true' : 'false';
+    else delete accessToggleButton.dataset.disabledNow;
   }
 }
 
 function renderCosts(costs) {
   if (!costGrid) return;
   const items = [
-    ['Ingresos', `${costs?.grossRevenueEur ?? 0} EUR`, 'Sesiones del corte'],
-    ['Sesiones', costs?.sessionsInWindow ?? 0, 'Ventana operativa'],
-    ['Pagadas', costs?.paidOrApprovedSessions ?? 0, 'Pago/beta aprobado'],
-    ['Respuestas', costs?.answersCaptured ?? 0, 'Transcripciones'],
-    ['Llamadas IA', costs?.providerCallsApprox ?? 0, 'Estimacion interna'],
-    ['Manuscritos', costs?.manuscriptsGenerated ?? 0, 'Caronte literario'],
-    ['PDFs', costs?.pdfsGenerated ?? 0, 'Artefactos generados'],
-    ['Revision', costs?.pendingEditorialCostDrivers ?? 0, 'Pendientes']
+    ['Valor de sesiones', costs?.grossRevenueEur == null ? '—' : `${costs.grossRevenueEur} EUR`, 'Estimación, no ingresos cobrados'],
+    ['Sesiones', costs?.sessionsInWindow ?? '—', 'Ventana operativa'],
+    ['Accesos aprobados', costs?.paidOrApprovedSessions ?? '—', 'No acredita un pago real'],
+    ['Respuestas', costs?.answersCaptured ?? '—', 'Transcripciones'],
+    ['Llamadas IA', costs?.providerCallsApprox ?? '—', 'Estimacion interna'],
+    ['Manuscritos', costs?.manuscriptsGenerated ?? '—', 'Caronte literario'],
+    ['PDFs', costs?.pdfsGenerated ?? '—', 'Artefactos generados'],
+    ['Revision', costs?.pendingEditorialCostDrivers ?? '—', 'Pendientes']
   ];
   costGrid.innerHTML = '';
   for (const [label, value, helper] of items) {
@@ -938,16 +419,20 @@ function renderCosts(costs) {
 
 function renderSecurity(security) {
   if (!securityGrid) return;
-  const policies = security?.retentionPolicies || [];
+  const policies = Array.isArray(security?.retentionPolicies) ? security.retentionPolicies : [];
+  const ttl = type => {
+    const days = policies.find(item => item.data_type === type)?.ttl_days;
+    return days == null ? '—' : `${days} d`;
+  };
   const items = [
-    ['Bloqueos', security?.abuseBlocked ?? 0, 'Rate limit'],
-    ['Challenges', security?.abuseChallenges ?? 0, 'Anti-abuso'],
-    ['Eventos abuso', security?.abuseEvents?.length ?? 0, 'Ultimos 120'],
-    ['RGPD', security?.privacyRequests?.length ?? 0, 'Solicitudes'],
-    ['Politicas', policies.length, 'Retencion'],
-    ['Audio TTL', `${policies.find((item) => item.data_type === 'audio')?.ttl_days ?? 7} d`, 'Storage privado'],
-    ['Respuestas TTL', `${policies.find((item) => item.data_type === 'answers')?.ttl_days ?? 30} d`, 'Datos sensibles'],
-    ['Auditoria TTL', `${policies.find((item) => item.data_type === 'admin_audit')?.ttl_days ?? 365} d`, 'Minimizada']
+    ['Bloqueos', security?.abuseBlocked ?? '—', 'Rate limit'],
+    ['Challenges', security?.abuseChallenges ?? '—', 'Anti-abuso'],
+    ['Eventos abuso', Array.isArray(security?.abuseEvents) ? security.abuseEvents.length : '—', 'Ultimos 120'],
+    ['RGPD', Array.isArray(security?.privacyRequests) ? security.privacyRequests.length : '—', 'Solicitudes'],
+    ['Politicas', Array.isArray(security?.retentionPolicies) ? policies.length : '—', 'Retencion'],
+    ['Audio TTL', ttl('audio'), 'Storage privado'],
+    ['Respuestas TTL', ttl('answers'), 'Datos sensibles'],
+    ['Auditoria TTL', ttl('admin_audit'), 'Minimizada']
   ];
   securityGrid.innerHTML = '';
   for (const [label, value, helper] of items) {
@@ -965,6 +450,10 @@ function renderSecurity(security) {
 function renderDeadLetters(deadLetters) {
   if (!deadLetterBody) return;
   deadLetterBody.innerHTML = '';
+  if (!Array.isArray(deadLetters)) {
+    deadLetterBody.innerHTML = '<tr class="empty-row"><td colspan="6">Incidencias no disponibles.</td></tr>';
+    return;
+  }
   if (!deadLetters?.length) {
     deadLetterBody.innerHTML = '<tr class="empty-row"><td colspan="6">Sin dead letters abiertas.</td></tr>';
     return;
@@ -973,6 +462,9 @@ function renderDeadLetters(deadLetters) {
     const row = document.createElement('tr');
     const id = escapeHtml(item.id);
     const status = String(item.status || 'open');
+    const retryBlocked = !['open', 'retrying'].includes(status)
+      || String(item.failed_action || item.failedAction || '').includes('book')
+      || item.error_code === 'provider_submission_uncertain' || item.diagnostic?.uncertain === true;
     row.innerHTML = `
       <td>${escapeHtml(formatDate(item.created_at || item.createdAt))}</td>
       <td><code>${escapeHtml(shortId(item.session_id || item.sessionId || item.target_id))}</code></td>
@@ -981,7 +473,7 @@ function renderDeadLetters(deadLetters) {
       <td>${badge(status)}</td>
       <td>
         <div class="row-actions">
-          <button type="button" data-retry-dead-letter="${id}" ${!['open', 'retrying'].includes(status) ? 'disabled' : ''}>Retry</button>
+          <button type="button" data-retry-dead-letter="${id}" ${retryBlocked ? 'disabled' : ''}>Retry</button>
           <button class="secondary" type="button" data-resolve-dead-letter="${id}" ${!['open', 'retrying'].includes(status) ? 'disabled' : ''}>Resolver</button>
         </div>
       </td>
@@ -999,12 +491,12 @@ function renderObservability(observability) {
   const costAnomaly = latestSla.cost?.anomaly || {};
   const items = [
     ['Synthetic', latestSynthetic.status || 'n/a', latestSynthetic.duration_ms ? `${latestSynthetic.duration_ms} ms` : 'ultimo run'],
-    ['Dead letters', observability?.deadLetterOpen ?? 0, 'Abiertas'],
+    ['Dead letters', observability?.deadLetterOpen ?? '—', 'Abiertas'],
     ['SLA', sla.health || 'n/a', 'Estado interno'],
-    ['Stuck now', observability?.stuckNow?.length ?? 0, 'Detectadas'],
-    ['Release rate', conversion.released ?? 0, 'Conversion'],
-    ['Book ready', conversion.bookReady ?? 0, 'Conversion'],
-    ['Cost anomaly', costAnomaly.anomaly ? 'yes' : 'no', costAnomaly.reason || 'normal'],
+    ['Stuck now', Array.isArray(observability?.stuckNow) ? observability.stuckNow.length : '—', 'Detectadas'],
+    ['Release rate', conversion.released ?? '—', 'Conversion'],
+    ['Book ready', conversion.bookReady ?? '—', 'Conversion'],
+    ['Cost anomaly', typeof costAnomaly.anomaly === 'boolean' ? (costAnomaly.anomaly ? 'yes' : 'no') : '—', costAnomaly.reason || 'Sin evaluación'],
     ['Alert webhook', observability?.alertDeliveries?.[0]?.status || 'n/a', 'Ultimo envio']
   ];
   observabilityGrid.innerHTML = '';
@@ -1018,7 +510,7 @@ function renderObservability(observability) {
     `;
     observabilityGrid.append(card);
   }
-  renderDeadLetters(observability?.deadLetters || []);
+  renderDeadLetters(observability?.deadLetters);
 }
 
 function renderAccessCampaigns(campaigns) {
@@ -1075,12 +567,12 @@ function renderViralAccess(viralAccess) {
   const policy = viralAccess?.policy || {};
   const metrics = viralAccess?.metrics || {};
   const items = [
-    ['Modo', policy.mode || 'fixed_beta', policy.fixedBetaEnabled ? 'fixed beta abierto' : 'cerrado'],
-    ['Campanas', metrics.activeCampaigns ?? 0, 'Activas'],
-    ['Links abiertos', metrics.openInvites ?? 0, 'No consumidos'],
-    ['Links usados', metrics.usedInvites ?? 0, 'Consumidos'],
-    ['Caducados', metrics.expiredInvites ?? 0, 'TTL vencido'],
-    ['Waitlist', metrics.waitlistQueued ?? 0, 'Cola opaca']
+    ['Modo', policy.mode || '—', typeof policy.fixedBetaEnabled === 'boolean' ? (policy.fixedBetaEnabled ? 'fixed beta abierto' : 'cerrado') : 'Sin información'],
+    ['Campanas', metrics.activeCampaigns ?? '—', 'Activas'],
+    ['Links abiertos', metrics.openInvites ?? '—', 'No consumidos'],
+    ['Links usados', metrics.usedInvites ?? '—', 'Consumidos'],
+    ['Caducados', metrics.expiredInvites ?? '—', 'TTL vencido'],
+    ['Waitlist', metrics.waitlistQueued ?? '—', 'Cola opaca']
   ];
   viralAccessGrid.innerHTML = '';
   for (const [label, value, helper] of items) {
@@ -1101,7 +593,33 @@ function renderViralAccess(viralAccess) {
   renderAccessInvites(viralAccess?.invites || []);
 }
 
+let luluCredentialSavePending = false;
+function providerPermission(action) {
+  const admin=latestDashboardData?.admin;
+  return Array.isArray(admin?.permissions)?admin.permissions.includes('*')||admin.permissions.includes(action)
+    :['owner','legacy_token','local_admin'].includes(admin?.role)||action==='adminTestProvider'&&admin?.role==='ops';
+}
+function renderLuluCredentialForm(provider) {
+  const probe=providerPermission('adminTestProvider')?'<button class="secondary" type="button" data-test-provider="lulu">Probar OAuth</button>':'';
+  if(provider.managedByEnvironment===true)return `<p>Par OAuth gestionado por el servidor. No se modifica desde este panel.</p>${probe}`;
+  if(!providerPermission('adminSaveLuluCredentials'))return `<p>OAuth de Lulu: Client Key y Client Secret privados. Solo el propietario puede guardar el par.</p>${probe}`;
+  return `<form data-lulu-credentials-form data-expected-revision="${escapeHtml(provider.updatedAt||'')}">
+    <label class="provider-secret-field"><span>Entorno de Lulu · obligatorio</span><select name="environment" required>
+      <option value="">Seleccione el entorno</option><option value="sandbox">Pruebas · sandbox</option><option value="production">Real · producción</option></select></label>
+    <label class="provider-secret-field"><span>Client Key · obligatorio</span><input name="clientKey" type="password" maxlength="2048" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
+    <label class="provider-secret-field"><span>Client Secret · obligatorio</span><input name="clientSecret" type="password" maxlength="2048" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
+    <label class="check-row"><input name="saveConsent" type="checkbox" value="yes" required><span>Autorizo guardar este par cifrado. No prueba la conexión ni autoriza pedidos o pagos.</span></label>
+    <small>Solo escritura. El panel vacía los campos al enviar y no guarda las claves en almacenamiento local. Otro par bloquea los recibos de impresión anteriores hasta revisar la configuración.</small>
+    <div class="provider-actions"><button type="submit">Guardar par OAuth</button>${probe}</div>
+    <p data-lulu-save-status role="status" aria-live="polite"></p>
+  </form>`;
+}
+
 function renderProviders(providers) {
+  const focused=document.activeElement?.closest?.('[data-lulu-credentials-form]');
+  const current=(providers||[]).find(provider=>provider.provider==='lulu');
+  if(focused&&!luluCredentialSavePending&&providerPermission('adminSaveLuluCredentials')&&current?.managedByEnvironment!==true&&
+    focused.dataset.expectedRevision===(current?.updatedAt||''))return;
   providerGrid.innerHTML = '';
   for (const provider of providers || []) {
     const card = document.createElement('article');
@@ -1117,16 +635,9 @@ function renderProviders(providers) {
     const providerId = escapeHtml(provider.provider);
     const keyLabel = providerKeyLabel(provider.provider);
     const keyPlaceholder = providerKeyPlaceholder(provider.provider);
-    card.innerHTML = `
-      <div class="provider-head">
-        <div>
-          <span>${escapeHtml(providerOperationalLabel(provider.provider))}</span>
-          <h3>${escapeHtml(provider.displayName || provider.provider)}</h3>
-        </div>
-        ${badge(status)}
-      </div>
-      <p>${escapeHtml(required)} / ${escapeHtml(last4)} / ${escapeHtml(provider.source || 'missing')} / probe=${escapeHtml(probe)}${escapeHtml(modelInfo)}${escapeHtml(voiceInfo)}</p>
-      <form data-provider-form="${providerId}">
+    const credentialForm = provider.provider === 'lulu'
+      ? renderLuluCredentialForm(provider)
+      : `<form data-provider-form="${providerId}">
         <label class="provider-secret-field">
           <span>${escapeHtml(keyLabel)}</span>
           <input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(keyPlaceholder)}" aria-label="${escapeHtml(keyLabel)}">
@@ -1136,7 +647,17 @@ function renderProviders(providers) {
           <button type="submit">Guardar key</button>
           <button class="secondary" type="button" data-test-provider="${providerId}">Probar conexion</button>
         </div>
-      </form>
+      </form>`;
+    card.innerHTML = `
+      <div class="provider-head">
+        <div>
+          <span>${escapeHtml(providerOperationalLabel(provider.provider))}</span>
+          <h3>${escapeHtml(provider.displayName || provider.provider)}</h3>
+        </div>
+        ${badge(status)}
+      </div>
+      <p>${escapeHtml(required)} / ${escapeHtml(last4)} / ${escapeHtml(provider.source || 'missing')} / probe=${escapeHtml(probe)}${escapeHtml(modelInfo)}${escapeHtml(voiceInfo)}</p>
+      ${credentialForm}
     `;
     providerGrid.append(card);
   }
@@ -1212,6 +733,23 @@ function pdfStatus(pdf) {
   return pdf.reviewStatus || pdf.review_status || 'pending_review';
 }
 
+function printValidationAllowed(pdf) {
+  const admin = latestDashboardData?.admin;
+  const allowed = Array.isArray(admin?.permissions)
+    ? admin.permissions.includes('*') || admin.permissions.includes('adminValidatePrint')
+    : ['editor', 'ops', 'owner', 'legacy_token', 'local_admin'].includes(admin?.role);
+  const validation = pdf?.printValidation || pdf?.print_validation || {};
+  const metadata = pdf?.metadata || {};
+  const state = validation.preflight;
+  const pages = pdf?.pageCount ?? pdf?.page_count;
+  const held = ['submitting', 'uncertain', 'failed', 'binding_changed', 'approval_required'];
+  return allowed && ['approved', 'released_to_customer'].includes(pdfStatus(pdf)) &&
+    metadata.template === 'caronte-a5-embedded-v2' && metadata.storage_verified === true &&
+    !!validation.editorial_approval && Number.isSafeInteger(pages) && pages >= 180 && pages <= 200 &&
+    state?.status !== 'ready' && !held.includes(state?.status) &&
+    !held.includes(state?.interior?.state) && !held.includes(state?.cover?.state);
+}
+
 function renderPdfs(pdfs) {
   pdfBody.innerHTML = '';
   if (!pdfs?.length) {
@@ -1222,13 +760,20 @@ function renderPdfs(pdfs) {
     const row = document.createElement('tr');
     const status = pdfStatus(pdf);
     const lulu = pdf.luluMetadata || pdf.lulu_metadata || {};
-    const luluStatus = lulu.ready_for_print ? 'ready_for_print' : 'not_ready';
+    const validation = pdf.printValidation || pdf.print_validation || {};
+    const state = validation.preflight;
+    const ready = lulu.ready_for_print === true && validation.ready_for_print === true &&
+      !!validation.editorial_approval && state?.status === 'ready' &&
+      state.interior?.state === 'normalized' && state.cover?.state === 'normalized';
+    const luluStatus = ready ? 'ready_for_print' : state?.status || lulu.ready_for_print_status || 'unknown';
+    const progress = state ? `<small>Interior: ${escapeHtml(statusText(state.interior?.state || 'pending'))}` +
+      ` · Cubierta: ${escapeHtml(statusText(state.cover?.state || 'pending'))}</small>` : '';
     const pdfId = escapeHtml(pdf.id);
     row.innerHTML = `
       <td><strong>${escapeHtml(pdf.fileName || pdf.file_name || shortId(pdf.id))}</strong></td>
       <td>${badge(status)}</td>
       <td>${escapeHtml(pdf.pageCount || pdf.page_count || 'n/a')}</td>
-      <td>${badge(luluStatus)}</td>
+      <td>${badge(luluStatus)}${progress}</td>
       <td>
         <div class="row-actions">
           <button type="button" data-preview-pdf="${pdfId}">Ver</button>
@@ -1236,11 +781,244 @@ function renderPdfs(pdfs) {
           <button class="secondary" type="button" data-reject-pdf="${pdfId}" ${status !== 'pending_review' ? 'disabled' : ''}>Rechazar</button>
           <button class="secondary" type="button" data-regen-pdf="${pdfId}">Regenerar</button>
           <button type="button" data-release-pdf="${pdfId}" ${status !== 'approved' ? 'disabled' : ''}>Liberar</button>
+          ${printValidationAllowed(pdf) ? `<button type="button" data-validate-print="${pdfId}" ${printValidationPending.has(pdf.id) ? 'disabled' : ''}>${state ? 'Consultar Lulu' : 'Validar con Lulu'}</button>` : ''}
+          ${printQuotationAllowed(pdf) ? `<button type="button" data-print-quote="${pdfId}">Preparar impresión</button>` : ''}
+          ${printOrderAllowed() && pdf.printOrder?.hasIntent ? `<button type="button" data-print-order="${pdfId}">Ver pedido</button>` : ''}
         </div>
       </td>
     `;
     pdfBody.append(row);
   }
+}
+
+async function validatePrint(pdfId) {
+  if (printValidationPending.has(pdfId)) return;
+  printValidationPending.add(pdfId);
+  try {
+    const current = await adminAction('adminPrintStatus', {pdfId});
+    if (current.pdf?.id !== pdfId || !printValidationAllowed(current.pdf)) throw new Error('Esta validación no está permitida en el estado actual.');
+    setText(printValidationStatus, 'Consultando Lulu. No se crea ningún pedido ni pago.');
+    const result = await adminAction('adminValidatePrint', {pdfId}, {timeoutMs: 120000});
+    const confirmed = await adminAction('adminPrintStatus', {pdfId});
+    if (!result.ok || !confirmed.ok || confirmed.pdf?.id !== pdfId ||
+        printReceiptJson(confirmed.pdf.printValidation) !== printReceiptJson(result.pdf?.printValidation) ||
+        printReceiptJson(confirmed.pdf.luluMetadata) !== printReceiptJson(result.pdf?.luluMetadata)) {
+      throw new Error('No se ha podido confirmar el estado de Lulu. Consulte de nuevo antes de continuar.');
+    }
+    if (latestDashboardData?.pdfs) latestDashboardData.pdfs = latestDashboardData.pdfs.map(pdf => pdf.id === pdfId ? confirmed.pdf : pdf);
+    const state = confirmed.pdf.printValidation?.preflight;
+    setText(printValidationStatus, `Lulu: ${statusText(state?.status || 'unknown')}. No se ha creado ni pagado un pedido.`);
+  } catch (error) {
+    setText(printValidationStatus, 'Estado sin confirmar. Actualice el panel; no repita un envío incierto.');
+    throw error;
+  } finally {
+    printValidationPending.delete(pdfId);
+    if (latestDashboardData?.pdfs) renderPdfs(latestDashboardData.pdfs);
+  }
+}
+
+function printReceiptJson(value) {
+  if (Array.isArray(value)) return `[${value.map(printReceiptJson).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${printReceiptJson(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
+function printQuotationAllowed(pdf) {
+  if(pdf?.printOrder?.hasIntent&&pdf.printOrder.canRequote!==true)return false;
+  const admin=latestDashboardData?.admin, p=pdf?.printValidation||pdf?.print_validation, l=pdf?.luluMetadata||pdf?.lulu_metadata;
+  const allowed=Array.isArray(admin?.permissions)?admin.permissions.includes('*')||admin.permissions.includes('adminQuotePrint')
+    :['ops','owner','legacy_token','local_admin'].includes(admin?.role);
+  return allowed && ['approved','released_to_customer'].includes(pdfStatus(pdf)) && p?.ready_for_print===true && l?.ready_for_print===true &&
+    p.preflight?.status==='ready' && p.preflight.interior?.state==='normalized' && p.preflight.cover?.state==='normalized';
+}
+
+function printQuoteArtifact(pdf) {
+  return printReceiptJson({review:pdfStatus(pdf),pages:pdf?.pageCount||pdf?.page_count,
+    print:pdf?.printValidation||pdf?.print_validation,lulu:pdf?.luluMetadata||pdf?.lulu_metadata});
+}
+
+function clearPrintQuote() {
+  clearPrintOrder();lastPrintQuotation=null;confirmedPrintQuoteInput=null;
+  if(printPrepareOrderButton)printPrepareOrderButton.disabled=true;
+  selectedPrintPdfId='';selectedPrintBinding=null;printShippingFingerprint=null;
+  if(printQuotePanel)printQuotePanel.hidden=true;
+  for(const node of Object.values(printAddressFields))if(node)node.value='';
+  if(printQuoteConsent)printQuoteConsent.checked=false;
+  if(printShippingLevel){printShippingLevel.innerHTML='<option value="">Consulte las opciones primero</option>';printShippingLevel.disabled=true;}
+  if(printQuoteCalculateButton)printQuoteCalculateButton.disabled=true;
+  setText(printQuoteSummary,'Sin presupuesto confirmado.');
+  setText(printQuoteActionStatus,'Una copia. Presupuesto informativo; sin pedido ni cobro.');
+}
+
+function printQuoteInput() {
+  const pdf=latestDashboardData?.pdfs?.find(item=>item.id===selectedPrintPdfId);
+  if(!printQuotationAllowed(pdf))throw new Error('El presupuesto no está permitido para este libro o este usuario.');
+  if(!printQuoteConsent?.checked)throw new Error('Confirme la dirección y su envío a Lulu antes de consultar.');
+  const shippingAddress=Object.fromEntries(Object.entries(printAddressFields).map(([key,node])=>[key,node?.value||'']));
+  return {pdfId:selectedPrintPdfId,shippingAddress,shippingConsent:true,currency:printQuoteCurrency?.value||'EUR'};
+}
+
+async function openPrintQuote(pdfId) {
+  const current=await adminAction('adminPrintStatus',{pdfId});
+  if(current.pdf?.id!==pdfId||!printQuotationAllowed(current.pdf))throw new Error('El libro aún no permite preparar impresión.');
+  clearPrintQuote();selectedPrintPdfId=pdfId;selectedPrintBinding=printQuoteArtifact(current.pdf);
+  setText(document.querySelector('#printQuoteBook'),`${current.pdf.fileName||pdfId} · ${current.pdf.pageCount} páginas · una copia`);
+  if(printQuotePanel)printQuotePanel.hidden=false;
+  const result=await adminAction('adminPrintQuote',{pdfId});
+  if(!result.ok)throw new Error('No se pudo consultar el presupuesto.');
+  renderPrintQuotation(result.quotation);
+}
+
+function renderPrintQuotation(quote) {
+  lastPrintQuotation=quote;
+  if(printPrepareOrderButton)printPrepareOrderButton.disabled=quote?.status!=='quoted'||quote.pdfId!==selectedPrintPdfId;
+  if(quote?.status==='address_review_required'){
+    setText(printQuoteSummary,`Lulu propone revisar la dirección. No hay presupuesto confirmado. Propuesta: ${JSON.stringify(quote.suggestedAddress||{})}`);return;
+  }
+  if(!quote?.costs){setText(printQuoteSummary,statusText(quote?.status||'not_quoted'));return;}
+  const money=value=>typeof value==='string'&&/^\d+(?:\.\d+)?$/.test(value)?`${value.replace('.',',')} ${quote.costs.currency}`:'Sin comprobar';
+  const items=[['Impresión, con impuestos',quote.costs.printing?.incl_tax],['Envío y manipulación, con impuestos',quote.costs.shipping_handling?.incl_tax],
+    ['Gestión, con impuestos',quote.costs.fulfillment?.incl_tax],['Impuestos incluidos',quote.costs.tax],['Descuento ya aplicado',quote.costs.discount],['Total',quote.costs.total_incl_tax]];
+  printQuoteSummary.innerHTML=`<p>${escapeHtml(statusText(quote.status))} · ${escapeHtml(quote.environment||'')} · ${escapeHtml(quote.shippingLevel||'')} · caduca ${escapeHtml(formatDate(quote.expiresAt))}</p>`+
+    `<div class="detail-grid">${items.map(([label,value])=>`<div class="detail-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(money(value))}</strong></div>`).join('')}</div>`+
+    '<p>Estimación del proveedor. El pedido requiere nueva comprobación y aprobación expresa. No se ha creado ni pagado ningún pedido.</p>';
+}
+
+async function loadPrintShippingOptions() {
+  if(printQuoteBusy||printOrderBusy)return;
+  const input=printQuoteInput();printQuoteBusy=true;printShippingFingerprint=null;
+  if(printQuoteCalculateButton)printQuoteCalculateButton.disabled=true;
+  if(printShippingOptionsButton)printShippingOptionsButton.disabled=true;
+  try{
+    const result=await adminAction('adminShippingOptions',input,{timeoutMs:120000});
+    if(!result.ok||!Array.isArray(result.options))throw new Error('Opciones de envío sin confirmar.');
+    if(printReceiptJson(input)!==printReceiptJson(printQuoteInput()))throw new Error('La dirección ha cambiado; consulte las opciones de nuevo.');
+    printShippingLevel.innerHTML='<option value="">Seleccione un envío</option>'+result.options.map(option=>`<option value="${escapeHtml(option.level)}">${escapeHtml(option.level)} · ${escapeHtml(option.cost_excl_tax==null?'Coste sin comprobar':option.cost_excl_tax.replace('.',',')+' '+option.currency)} sin impuestos · ${option.traceable===true?'con seguimiento':option.traceable===false?'sin seguimiento':'seguimiento sin comprobar'}</option>`).join('');
+    printShippingLevel.disabled=!result.options.length;printShippingFingerprint=printReceiptJson(input);
+    if(printQuoteCalculateButton)printQuoteCalculateButton.disabled=!result.options.length;
+    setText(printQuoteActionStatus,result.options.length?'Elija envío y calcule el total. Sin pedido ni pago.':'Lulu no ofrece envíos para estos datos.');
+  }finally{printQuoteBusy=false;if(printShippingOptionsButton)printShippingOptionsButton.disabled=false;}
+}
+
+async function calculatePrintQuote() {
+  if(printQuoteBusy||printOrderBusy)return;
+  const input=printQuoteInput();
+  if(printShippingFingerprint!==printReceiptJson(input))throw new Error('Consulte las opciones de envío para esta dirección primero.');
+  if(!printShippingLevel?.value)throw new Error('Seleccione una opción de envío.');
+  clearPrintOrder();lastPrintQuotation=null;confirmedPrintQuoteInput=null;
+  if(printPrepareOrderButton)printPrepareOrderButton.disabled=true;
+  printQuoteBusy=true;setText(printQuoteSummary,'Calculando presupuesto; todavía sin confirmar.');
+  try{
+    const result=await adminAction('adminQuotePrint',{...input,shippingLevel:printShippingLevel.value},{timeoutMs:120000});
+    if(result.quotation?.status==='address_review_required'){renderPrintQuotation(result.quotation);return;}
+    const confirmed=await adminAction('adminPrintQuote',{pdfId:input.pdfId});
+    if(!result.ok||!confirmed.ok||confirmed.quotation?.pdfId!==input.pdfId||printReceiptJson(result.quotation)!==printReceiptJson(confirmed.quotation)||
+        printReceiptJson(input)!==printReceiptJson(printQuoteInput()))throw new Error('No se ha podido confirmar el presupuesto.');
+    renderPrintQuotation(confirmed.quotation);
+    confirmedPrintQuoteInput=printReceiptJson({...input,shippingLevel:printShippingLevel.value});
+    setText(printQuoteActionStatus,'Presupuesto guardado y releído. Ningún pedido ni cobro.');
+  }catch(error){setText(printQuoteSummary,'Presupuesto sin confirmar. Consulte de nuevo antes de continuar.');throw error;}
+  finally{printQuoteBusy=false;}
+}
+
+function printOrderAllowed() {
+  const admin=latestDashboardData?.admin;
+  return Array.isArray(admin?.permissions)?admin.permissions.includes('*')||admin.permissions.includes('adminPrintOrder')
+    :['ops','owner','legacy_token','local_admin'].includes(admin?.role);
+}
+
+function clearPrintOrder() {
+  selectedPrintOrderPdfId='';selectedPrintOrder=null;
+  if(printOrderPanel)printOrderPanel.hidden=true;
+  if(printOrderApprovalForm)printOrderApprovalForm.hidden=true;
+  if(printOrderAmount)printOrderAmount.value='';
+  for(const node of [printOrderConsent,printManualPaymentConsent])if(node)node.checked=false;
+  for(const node of Object.values(printOrderButtons))if(node)node.disabled=true;
+  if(printPaymentPortal){printPaymentPortal.hidden=true;printPaymentPortal.removeAttribute('href');}
+  setText(printOrderSummary,'Sin pedido seleccionado.');
+  setText(printOrderActionStatus,'Abrir el portal no confirma el pago. La entrega se comprueba por separado.');
+}
+
+function renderPrintOrder(order) {
+  selectedPrintOrder=order;
+  const quote=lastPrintQuotation?.pdfId===selectedPrintOrderPdfId&&lastPrintQuotation.status==='quoted'?lastPrintQuotation:null;
+  const approval=!!quote&&['not_approved','approved','approval_invalidated'].includes(order?.state);
+  if(printOrderApprovalForm)printOrderApprovalForm.hidden=!approval;
+  const permissions={approve:approval,submit:order?.canSubmit===true&&order.submissionEnabled===true,status:true,
+    sync:order?.canSync===true,reconcile:order?.canReconcile===true};
+  for(const [action,node] of Object.entries(printOrderButtons))if(node)node.disabled=printOrderBusy||!permissions[action];
+  const costs=order?.costs||quote?.costs,total=costs?.total_incl_tax,validTotal=typeof total==='string'&&/^\d+(?:\.\d+)?$/.test(total);
+  const payment={paid_confirmed:'Pago confirmado',unpaid:'Sin pagar',payment_in_progress:'Pago en curso; todavía sin confirmar',unknown:'Pago sin confirmar'};
+  const labels={not_approved:'Sin aprobación del pedido',approved:'Aprobación guardada; pedido sin enviar',approval_invalidated:'Aprobación invalidada',
+    submitted:'Pedido creado; recibo pendiente de comprobación',verified:'Recibo del proveedor comprobado',status_unverified:'Estado del proveedor sin confirmar',uncertain:'Envío incierto; no repetir',submitting:'Envío en curso; no repetir'};
+  printOrderSummary.innerHTML=`<p>${escapeHtml(labels[order?.state]||statusText(order?.state))} · ${escapeHtml(order?.environment||quote?.environment||'')}</p>`+
+    `<p>Una copia · ${escapeHtml(order?.shippingLevel||quote?.shippingLevel||'sin envío')} · total ${escapeHtml(validTotal?total.replace('.',',')+' '+costs.currency:'sin confirmar')}</p>`+
+    `<p>Lulu: ${escapeHtml(order?.providerId||'sin identificador')} · ${escapeHtml(order?.providerStatus||'sin estado')} · ${escapeHtml(payment[order?.paymentStatus]||payment.unknown)} · ${order?.delivered===true?'Entrega confirmada':'Entrega sin confirmar'}</p>`+
+    `<p>Última comprobación: ${escapeHtml(order?.checkedAt?formatDate(order.checkedAt):'sin lectura confirmada')}</p>`+
+    '<p>Abrir el portal no confirma el pago. Compruebe el estado en Lulu después de pagar.</p>'+
+    (order?.submissionEnabled===false?'<p>El envío de pedidos está desactivado en el servidor.</p>':'');
+  const tracking=order?.tracking;
+  if(order?.paymentStatus==='paid_confirmed'&&Array.isArray(tracking?.urls)){
+    const links=tracking.urls.filter(value=>{try{const url=new URL(value);return typeof value==='string'&&value.length<=8192&&url.protocol==='https:'&&!url.username&&!url.password&&!url.hash&&!/^(localhost|127\.|0\.|\[::1\])/.test(url.hostname);}catch{return false;}});
+    printOrderSummary.innerHTML+=`<p>Seguimiento: ${escapeHtml(tracking.carrier||'transportista sin confirmar')} · ${escapeHtml(tracking.id||'sin referencia')} `+
+      links.map((url,index)=>`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Consultar envío ${index+1}</a>`).join(' · ')+'</p>';
+  }
+  if(printPaymentPortal){
+    const portal=order?.environment==='production'?'https://developers.lulu.com/':'https://developers.sandbox.lulu.com/';
+    const age=Date.now()-Date.parse(order?.checkedAt);
+    const allowed=order?.canPay===true&&order.providerStatus==='UNPAID'&&order.paymentStatus==='unpaid'&&age>=0&&age<120000&&order.paymentPortalUrl===portal;
+    printPaymentPortal.hidden=!allowed;
+    if(allowed)printPaymentPortal.setAttribute('href',portal);else printPaymentPortal.removeAttribute('href');
+  }
+}
+
+async function openPrintOrder(pdfId) {
+  if(!printOrderAllowed())throw new Error('Este usuario no puede gestionar pedidos.');
+  const result=await adminAction('adminPrintOrder',{pdfId});
+  if(!result.ok||result.order?.pdfId!==pdfId)throw new Error('No se pudo confirmar el pedido.');
+  clearPrintOrder();selectedPrintOrderPdfId=pdfId;
+  if(printOrderPanel)printOrderPanel.hidden=false;
+  renderPrintOrder(result.order);
+}
+
+async function printOrderAction(action) {
+  if(printOrderBusy)return;
+  if(printQuoteBusy)throw new Error('Espere a la confirmación del presupuesto.');
+  if(!printOrderAllowed()||!selectedPrintOrderPdfId)throw new Error('Este usuario no puede gestionar este pedido.');
+  const pdfId=selectedPrintOrderPdfId;
+  const actions={approve:'adminApprovePrintOrder',submit:'adminSubmitPrintOrder',sync:'adminSyncPrintOrder',reconcile:'adminReconcilePrintOrder',status:'adminPrintOrder'};
+  if(!actions[action])throw new Error('Acción de pedido no permitida.');
+  let approval;
+  if(action==='approve'){
+    if(!printOrderConsent?.checked||!printManualPaymentConsent?.checked)throw new Error('Confirme el pedido y el modo de pago manual de Lulu.');
+    const input={...printQuoteInput(),shippingLevel:printShippingLevel?.value};
+    if(pdfId!==selectedPrintPdfId||lastPrintQuotation?.status!=='quoted'||lastPrintQuotation.pdfId!==pdfId||
+      confirmedPrintQuoteInput!==printReceiptJson(input))throw new Error('Confirme de nuevo el presupuesto para esta dirección y envío.');
+    const amount=printOrderAmount?.value;
+    if(!/^\d+(?:\.\d+)?$/.test(amount||''))throw new Error('Escriba el importe exacto con punto decimal.');
+    approval={...input,quoteId:lastPrintQuotation.id,quantity:1,currency:lastPrintQuotation.costs.currency,amount,orderConsent:true,manualPaymentConfirmed:true};
+  }
+  const previous=selectedPrintOrder;
+  printOrderBusy=true;if(selectedPrintOrder)renderPrintOrder(selectedPrintOrder);
+  try{
+    const fresh=await adminAction('adminPrintOrder',{pdfId});
+    if(!fresh.ok||fresh.order?.pdfId!==pdfId||selectedPrintOrderPdfId!==pdfId)throw new Error('No se pudo confirmar el pedido seleccionado.');
+    if(action==='status'){renderPrintOrder(fresh.order);setText(printOrderActionStatus,'Registro releído. No se ha enviado ni pagado nada desde esta consulta.');return;}
+    if(action==='submit'&&(!fresh.order.canSubmit||fresh.order.submissionEnabled!==true||previous?.id!==fresh.order.id||previous.quoteId!==fresh.order.quoteId||
+      printReceiptJson(previous.costs)!==printReceiptJson(fresh.order.costs)))throw new Error('El envío del pedido no está permitido. Consulte y revise su aprobación.');
+    if(action==='sync'&&!fresh.order.canSync)throw new Error('Falta el identificador de Lulu.');
+    if(action==='reconcile'&&!fresh.order.canReconcile)throw new Error('Este pedido no requiere conciliación.');
+    const result=await adminAction(actions[action],{pdfId,...(approval||{}),...(action==='submit'?{orderId:fresh.order.id}:{})},{timeoutMs:120000});
+    const confirmed=await adminAction('adminPrintOrder',{pdfId});
+    if(!result.ok||!confirmed.ok||confirmed.order?.pdfId!==pdfId||selectedPrintOrderPdfId!==pdfId||
+      printReceiptJson(result.order)!==printReceiptJson(confirmed.order))throw new Error('No se ha podido confirmar el recibo. Consulte el registro; no repita el envío.');
+    renderPrintOrder(confirmed.order);
+    if(action==='approve')for(const node of [printOrderConsent,printManualPaymentConsent])if(node)node.checked=false;
+    setText(printOrderActionStatus,action==='approve'?'Aprobación guardada y releída. Todavía sin enviar ni pagar.':'Estado guardado y releído. Consulte el recibo; esta acción no efectúa pagos.');
+  }catch(error){
+    renderPrintOrder({pdfId,state:'unknown',canSubmit:false,canSync:false,canPay:false,canReconcile:false});
+    setText(printOrderActionStatus,'Estado sin confirmar. Consulte el registro; no repita un envío incierto.');throw error;
+  }finally{printOrderBusy=false;if(selectedPrintOrder)renderPrintOrder(selectedPrintOrder);}
 }
 
 function renderAudit(events) {
@@ -1310,58 +1088,32 @@ function renderSessionDetail(data) {
   `;
 }
 
-function dashboardItem(collection, id) {
-  const itemId = String(id || '');
-  return (latestDashboardData?.[collection] || []).find((item) => {
-    const candidates = [item.id, item.sessionId, item.session_id, item.campaignId, item.campaign_id, item.tokenHint, item.token_hint];
-    return candidates.some((candidate) => String(candidate || '') === itemId);
-  });
-}
-
-function showcaseSessionDetail(sessionId) {
-  const session = dashboardItem('sessions', sessionId);
-  if (!session || !isShowcaseItem(session)) return null;
-  return {
-    ok: true,
-    session,
-    events: [
-      { eventType: 'voice_intro_started', createdAt: minutesAgo(54) },
-      { eventType: 'answer_transcribed', createdAt: minutesAgo(48) },
-      { eventType: 'psych_map_generated', createdAt: minutesAgo(40) },
-      { eventType: 'manuscript_generated', createdAt: minutesAgo(34) },
-      { eventType: 'pdf_rendered', createdAt: minutesAgo(29) }
-    ],
-    answers: [
-      { questionIndex: 1, transcriptSource: 'elevenlabs_voice_session', qualityScore: 0.94, transcript: 'Recuerdo un momento concreto en el que senti que mi vida no estaba todavia decidida.' },
-      { questionIndex: 3, transcriptSource: 'backend_transcription', qualityScore: 0.91, transcript: 'Mi biografia profesional mezcla ambicion, cansancio y una necesidad fuerte de control.' },
-      { questionIndex: 5, transcriptSource: 'backend_transcription', qualityScore: 0.89, transcript: 'Mi biografia personal esta atravesada por decisiones que he pospuesto durante demasiado tiempo.' }
-    ],
-    artifacts: [{ type: 'pdf', status: session.pdfReviewStatus || 'pending_review' }],
-    psychMaps: (latestDashboardData?.psychMaps || []).filter((item) => item.sessionId === sessionId || item.session_id === sessionId),
-    manuscripts: (latestDashboardData?.manuscripts || []).filter((item) => item.sessionId === sessionId || item.session_id === sessionId),
-    pdfs: (latestDashboardData?.pdfs || []).filter((item) => item.sessionId === sessionId || item.session_id === sessionId),
-    auditEvents: []
-  };
-}
-
-function isShowcaseActionTarget(id) {
-  return ['sessions', 'pdfs', 'deadLetters', 'campaigns', 'invites'].some((collection) => {
-    if (collection === 'deadLetters') return (latestDashboardData?.observability?.deadLetters || []).some((item) => String(item.id) === String(id) && isShowcaseItem(item));
-    if (collection === 'campaigns') return (latestDashboardData?.viralAccess?.campaigns || []).some((item) => String(item.id) === String(id) && isShowcaseItem(item));
-    if (collection === 'invites') return (latestDashboardData?.viralAccess?.invites || []).some((item) => String(item.id) === String(id) && isShowcaseItem(item));
-    return isShowcaseItem(dashboardItem(collection, id));
-  });
-}
-
-function showShowcaseActionMessage() {
-  setText(adminStatus, 'Dato simulado: no se ejecuta ninguna accion real. Anade ?real=1 a la URL para operar solo con datos reales.');
-}
 
 async function refresh() {
   setText(adminStatus, 'Actualizando...');
-  const rawData = await adminAction('adminDashboard');
-  const data = enrichDashboard(rawData);
+  let data;
+  try {
+    data = await adminAction('adminDashboard');
+    if (data?.ok !== true) throw new Error('admin_dashboard_unavailable');
+  } catch (error) {
+    latestDashboardData = null;
+    if(providerGrid)providerGrid.innerHTML='';
+    clearPrintQuote();
+    selectedBookJobDetail = null;
+    selectedPrintJobDetail = null;
+    if (workspace) workspace.hidden = true;
+    if (adminGate) adminGate.hidden = false;
+    if (pdfPreview) pdfPreview.removeAttribute('src');
+    if (coverPdfLink) { coverPdfLink.hidden = true; coverPdfLink.removeAttribute('href'); }
+    setText(adminMode, error instanceof Error ? error.message : 'No se pudo sincronizar');
+    throw error;
+  }
   latestDashboardData = data;
+  if(selectedPrintOrderPdfId&&(!printOrderAllowed()||!data.pdfs?.some(pdf=>pdf.id===selectedPrintOrderPdfId)))clearPrintOrder();
+  if(selectedPrintPdfId){
+    const selected=data.pdfs?.find(pdf=>pdf.id===selectedPrintPdfId);
+    if(!printQuotationAllowed(selected)||printQuoteArtifact(selected)!==selectedPrintBinding)clearPrintQuote();
+  }
   if (data.admin) {
     const who = data.admin.email || data.admin.label || data.admin.mode || 'operador';
     setText(adminIdentity, `${who} / ${data.admin.role || 'admin'}`);
@@ -1379,6 +1131,12 @@ async function refresh() {
   renderViralAccess(data.viralAccess);
   renderProviders(data.providers);
   renderSessions(data.sessions);
+  renderBookJobs(data.bookJobs);
+  renderPrintJobs(data.printJobs);
+  const runtime = data.bookRuntime;
+  setText(bookRuntimeStatus, runtime
+    ? `Escritor: ${runtime.writerModel || 'sin modelo'} / ${runtime.openaiConfigured ? 'clave configurada' : 'sin clave'}. Revisor: ${runtime.reviewerModel || 'sin modelo'} / ${runtime.anthropicConfigured ? 'clave configurada' : 'sin clave'}.`
+    : 'Configuración del motor no disponible.');
   renderCaronteMaps(data.psychMaps);
   renderManuscripts(data.manuscripts);
   renderPdfs(data.pdfs);
@@ -1387,6 +1145,9 @@ async function refresh() {
 }
 
 async function openPanel() {
+  if (adminGate) adminGate.hidden = false;
+  if (workspace) workspace.hidden = true;
+  if (!hasBackendConfig()) throw new Error('backend_not_configured');
   const email = adminEmailInput?.value?.trim() || '';
   const password = adminPasswordInput?.value || '';
   const storedUser = getStoredUser();
@@ -1397,18 +1158,217 @@ async function openPanel() {
   } else if (storedUser && !adminToken && !(tokenInput?.value || '').trim()) {
     adminToken = '';
   } else {
-    adminToken = tokenInput.value || adminToken || 'local_admin';
+    adminToken = (tokenInput?.value || adminToken || '').trim();
+    if (!adminToken) throw new Error('admin_credentials_required');
     sessionStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
     clearSession();
   }
+  await refresh();
   if (adminGate) adminGate.hidden = true;
   if (workspace) workspace.hidden = false;
-  setText(adminMode, hasBackendConfig() ? 'Modo backend' : 'Modo local');
-  await refresh();
+  setText(adminMode, 'Conectado al servidor');
+}
+
+function renderBookJobs(jobs) {
+  if (!bookJobsBody) return;
+  bookJobsBody.innerHTML = '';
+  if (!Array.isArray(jobs)) {
+    bookJobsBody.innerHTML = '<tr class="empty-row"><td colspan="6">Cola de libros no disponible. Actualice el servidor para consultar este proceso.</td></tr>';
+    return;
+  }
+  if (!jobs.length) {
+    bookJobsBody.innerHTML = '<tr class="empty-row"><td colspan="6">Aún no hay trabajos de escritura.</td></tr>';
+    return;
+  }
+  for (const job of jobs) {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td><code>${escapeHtml(shortId(job.session_id))}</code></td>
+      <td>${badge(job.status)}</td><td>${escapeHtml(job.stage || '—')}</td>
+      <td>${escapeHtml(job.error_code || '—')}</td>
+      <td>${escapeHtml(formatDate(job.updated_at))}</td>
+      <td><button type="button" class="secondary" data-book-job="${escapeHtml(job.id)}">Ver proceso</button></td>`;
+    bookJobsBody.append(row);
+  }
+}
+
+function bookJobPermissions(detail, admin = {}) {
+  const operator = ['ops', 'owner', 'legacy_token'].includes(admin.role);
+  const blocked = operator && detail?.job?.status === 'blocked';
+  const failed = (detail?.steps || []).filter(step => step.status === 'failed').at(-1);
+  const safeErrors = ['provider_key_missing', 'provider_model_missing', 'provider_config_invalid', 'provider_poll_unavailable', 'provider_http_error'];
+  return {
+    cancel: blocked,
+    resume: Boolean(blocked && failed && failed.stage !== 'gate'
+      && safeErrors.includes(detail.job.error_code)
+      && (!failed.error_code || failed.error_code === detail.job.error_code)
+      && !(detail.steps || []).some(step => step.diagnostic?.uncertain === true))
+  };
+}
+
+function renderBookJobDetail(detail) {
+  selectedBookJobDetail = detail;
+  const job = detail?.job;
+  const permissions = bookJobPermissions(detail, latestDashboardData?.admin);
+  if (resumeBookButton) resumeBookButton.disabled = bookJobActionPending || !permissions.resume;
+  if (cancelBookButton) cancelBookButton.disabled = bookJobActionPending || !permissions.cancel;
+  if (!job) {
+    setText(bookJobSummary, 'Sin trabajo seleccionado.');
+    if (bookJobStepsBody) bookJobStepsBody.innerHTML = '';
+    return;
+  }
+  setText(bookJobSummary, `${job.id} / ${statusText(job.status)} / ${job.stage || '—'} / ${job.error_code || 'sin error'}`);
+  const uncertain = (detail.steps || []).some(step => step.diagnostic?.uncertain === true);
+  setText(bookJobActionStatus, uncertain
+    ? 'Resultado del proveedor incierto. Requiere reconciliación antes de cualquier nueva petición.'
+    : permissions.resume ? 'Corrija la causa y registre el motivo antes de reanudar.'
+      : job.status === 'blocked' ? 'Este bloqueo requiere revisión; la reanudación automática no está disponible.' : 'Estado consultado en el servidor.');
+  if (!bookJobStepsBody) return;
+  bookJobStepsBody.innerHTML = '';
+  for (const step of detail.steps || []) {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td>${escapeHtml(step.step_key)}</td><td>${badge(step.status)}</td>
+      <td>${escapeHtml(step.model || '—')}</td><td>${escapeHtml(step.attempt ?? '—')}</td>
+      <td><code>${escapeHtml(step.provider_request_id || '—')}</code></td>
+      <td>${escapeHtml(JSON.stringify(step.usage || {}))}</td>
+      <td>${escapeHtml(step.error_code || '—')} ${escapeHtml(JSON.stringify(step.diagnostic || {}))}</td>`;
+    bookJobStepsBody.append(row);
+  }
+  if (!(detail.steps || []).length) bookJobStepsBody.innerHTML = '<tr class="empty-row"><td colspan="7">Sin peticiones registradas.</td></tr>';
+}
+
+async function loadBookJob(jobId) {
+  selectedBookJobId = jobId;
+  const detail = await adminAction('adminBookJob', { jobId });
+  if (selectedBookJobId === jobId) renderBookJobDetail(detail);
+  return detail;
+}
+
+async function changeBookJob(action) {
+  if (!['adminResumeBook', 'adminCancelBook'].includes(action)) throw new Error('book_job_action_invalid');
+  if (bookJobActionPending) throw new Error('Acción de libro en curso');
+  const jobId = selectedBookJobId;
+  if (!jobId) throw new Error('Seleccione un trabajo');
+  const reason = bookJobReasonInput?.value?.trim() || '';
+  if (reason.length < 8 || reason.length > 1000) throw new Error('Indique un motivo de 8 a 1000 caracteres');
+  bookJobActionPending = true;
+  if (resumeBookButton) resumeBookButton.disabled = true;
+  if (cancelBookButton) cancelBookButton.disabled = true;
+  try {
+    const current = await adminAction('adminBookJob', { jobId });
+    if (selectedBookJobId !== jobId) throw new Error('El trabajo seleccionado ha cambiado');
+    if (current?.ok !== true || current.job?.id !== jobId) throw new Error('El proceso recibido no coincide con el trabajo seleccionado');
+    renderBookJobDetail(current);
+    const permission = action === 'adminResumeBook' ? 'resume' : 'cancel';
+    if (!bookJobPermissions(current, latestDashboardData?.admin)[permission]) throw new Error('La acción no está permitida en el estado actual');
+    await adminAction(action, { jobId, reason });
+    const confirmed = await adminAction('adminBookJob', { jobId });
+    if (confirmed.job?.id !== jobId || (action === 'adminCancelBook' && confirmed.job.status !== 'cancelled')
+      || (action === 'adminResumeBook' && !['queued', 'running', 'ready'].includes(confirmed.job.status))) {
+      if (selectedBookJobId === jobId) renderBookJobDetail(confirmed);
+      throw new Error('No se ha confirmado el cambio de estado. Actualice el proceso antes de repetir.');
+    }
+    if (selectedBookJobId === jobId) {
+      renderBookJobDetail(confirmed);
+      bookJobReasonInput.value = '';
+    }
+    await refresh();
+  } finally {
+    bookJobActionPending = false;
+    if (selectedBookJobDetail) renderBookJobDetail(selectedBookJobDetail);
+  }
+}
+
+function renderPrintJobs(page, append = false) {
+  if (!printJobsBody) return;
+  if (!append) printJobsBody.innerHTML = '';
+  printJobsPageState = page;
+  if (morePrintJobsButton) morePrintJobsButton.hidden = !(page?.available === true && page.hasMore && Number.isSafeInteger(page.nextOffset));
+  if (page?.available !== true || !Array.isArray(page.items)) {
+    printJobsBody.innerHTML = '<tr class="empty-row"><td colspan="6">Cola PDF no disponible. Compruebe la activación y el servidor.</td></tr>'; return;
+  }
+  if (!page.items.length && !append) printJobsBody.innerHTML = '<tr class="empty-row"><td colspan="6">Aún no hay trabajos PDF.</td></tr>';
+  for (const job of page.items) {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td><code>${escapeHtml(shortId(job.session_id))}</code></td><td>${escapeHtml(job.version)}</td>
+      <td>${badge(job.status)}</td><td>${escapeHtml(job.stage || '—')}</td><td>${escapeHtml(job.error_code || '—')}</td>
+      <td><button type="button" class="secondary" data-print-job="${escapeHtml(job.id)}">Ver proceso PDF</button></td>`;
+    printJobsBody.append(row);
+  }
+}
+async function morePrintJobs() {
+  if (printJobsPageBusy || !printJobsPageState?.hasMore) return;
+  printJobsPageBusy = true;
+  if (morePrintJobsButton) morePrintJobsButton.disabled = true;
+  try { renderPrintJobs(await adminAction('adminPrintJobs',{offset:printJobsPageState.nextOffset,limit:100}),true); }
+  finally { printJobsPageBusy = false; if (morePrintJobsButton) morePrintJobsButton.disabled = false; }
+}
+function printJobPermissions(detail) {
+  const operator = ['ops','owner','legacy_token'].includes(latestDashboardData?.admin?.role);
+  const available = operator && detail?.ok === true && detail.job?.status === 'blocked' && !printJobBusy && !printJobUnconfirmed;
+  return {resume:Boolean(available && detail.canResume === true),cancel:Boolean(available && detail.canCancel === true)};
+}
+function renderPrintJobDetail(detail) {
+  selectedPrintJobDetail = detail;
+  const job = detail?.job, permissions = printJobPermissions(detail);
+  if (resumePrintButton) resumePrintButton.disabled = !permissions.resume;
+  if (cancelPrintButton) cancelPrintButton.disabled = !permissions.cancel;
+  setText(printJobSummary,job ? `${job.id} / v${job.version} / ${statusText(job.status)} / ${job.stage || '—'} / ${job.error_code || 'sin error'}` : 'Sin proceso seleccionado.');
+  setText(printJobActionStatus,printJobUnconfirmed ? 'Intervención sin confirmar. Consulte de nuevo el proceso antes de cualquier decisión.'
+    : job?.status === 'blocked' ? 'Corrija la causa y registre el motivo. Las etapas terminadas se conservan.' : 'Estado consultado en el servidor. Sin pedido ni pago.');
+  if (!printJobStepsBody) return;
+  printJobStepsBody.innerHTML = '';
+  for (const step of detail?.steps || []) {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td>${escapeHtml(step.step_key)}</td><td>${badge(step.status)}</td><td>${escapeHtml(step.attempt ?? '—')}</td>
+      <td><code>${escapeHtml(step.output_hash || '—')}</code></td><td>${escapeHtml(step.error_code || '—')}</td>`;
+    printJobStepsBody.append(row);
+  }
+  if (!detail?.steps?.length) printJobStepsBody.innerHTML = '<tr class="empty-row"><td colspan="5">Sin etapas registradas.</td></tr>';
+}
+async function loadPrintJob(jobId) {
+  if (printJobBusy) throw new Error('Intervención PDF en curso');
+  selectedPrintJobId = jobId;
+  const detail = await adminAction('adminPrintJob',{jobId});
+  if (detail?.ok !== true || detail.job?.id !== jobId) throw new Error('El proceso PDF recibido no coincide');
+  if (selectedPrintJobId === jobId) { printJobUnconfirmed = false; renderPrintJobDetail(detail); }
+  return detail;
+}
+async function changePrintJob(action) {
+  if (!['adminResumePrint','adminCancelPrint'].includes(action)) throw new Error('print_control_not_allowed');
+  if (printJobBusy) throw new Error('Intervención PDF en curso');
+  if (printJobUnconfirmed) throw new Error('Intervención sin confirmar; consulte el proceso');
+  const jobId = selectedPrintJobId, reason = printJobReasonInput?.value?.trim() || '';
+  if (!jobId) throw new Error('Seleccione un proceso PDF');
+  if (reason.length < 8 || reason.length > 1000) throw new Error('Indique un motivo de 8 a 1000 caracteres');
+  if (!printJobPermissions(selectedPrintJobDetail)[action === 'adminResumePrint' ? 'resume' : 'cancel']) throw new Error('La acción PDF no está permitida');
+  printJobBusy = true;renderPrintJobDetail(selectedPrintJobDetail);
+  let confirmedChange = false;
+  try {
+    const current = await adminAction('adminPrintJob',{jobId});
+    if (selectedPrintJobId !== jobId || current?.ok !== true || current.job?.id !== jobId) throw new Error('El proceso PDF recibido no coincide');
+    selectedPrintJobDetail = current;
+    const allowed = action === 'adminResumePrint' ? current.canResume : current.canCancel;
+    if (current.job.status !== 'blocked' || allowed !== true || typeof current.job.updated_at !== 'string') throw new Error('La acción PDF no está permitida en el estado actual');
+    const revision = current.job.updated_at, decision = action === 'adminResumePrint' ? 'resume' : 'cancel';
+    printJobUnconfirmed = true;
+    try { await adminAction(action,{jobId,reason,expectedRevision:revision}); } catch { /* Resolve by governing GET only. */ }
+    const confirmed = await adminAction('adminPrintJob',{jobId});
+    if (confirmed?.ok !== true || confirmed.job?.id !== jobId || confirmed.lastControl?.action !== decision
+      || confirmed.lastControl?.previousRevision !== revision || (decision === 'cancel' && confirmed.job.status !== 'cancelled')
+      || (decision === 'resume' && !['queued','running','ready','blocked'].includes(confirmed.job.status))) throw new Error('No se ha confirmado la intervención. Consulte el proceso; no repita la petición.');
+    selectedPrintJobDetail = confirmed;printJobUnconfirmed = false;confirmedChange = true;printJobReasonInput.value = '';
+    await refresh();
+  } finally {
+    printJobBusy = false;
+    renderPrintJobDetail(selectedPrintJobDetail);
+    if (confirmedChange) setText(printJobActionStatus,'Cambio confirmado en el servidor. Sin pedido ni pago.');
+  }
 }
 
 function previewPdf(pdf) {
+  if (coverPdfLink) { coverPdfLink.hidden = true; coverPdfLink.removeAttribute('href'); }
   if (!pdf?.pdfBase64 && !pdf?.signedUrl) {
+    if (pdfPreview) pdfPreview.removeAttribute('src');
     setText(previewMeta, 'PDF sin binario disponible');
     return;
   }
@@ -1416,6 +1376,10 @@ function previewPdf(pdf) {
     ? `data:${pdf.mimeType || 'application/pdf'};base64,${pdf.pdfBase64}`
     : pdf.signedUrl;
   if (pdfPreview) pdfPreview.src = url;
+  if (coverPdfLink && typeof pdf.coverSignedUrl === 'string' && pdf.coverSignedUrl.startsWith('https://')) {
+    coverPdfLink.href = pdf.coverSignedUrl;
+    coverPdfLink.hidden = false;
+  }
   setText(previewMeta, `${pdf.fileName || 'pdf'} / ${statusText(pdfStatus(pdf))} / ${pdf.storagePath ? 'storage privado' : 'inline'}`);
 }
 
@@ -1431,31 +1395,25 @@ function showObservabilityReport(value) {
 
 async function handleWorkspaceClick(event) {
   const target = event.target;
-  if (!(target instanceof HTMLElement)) return;
-  const previewId = target.dataset.previewPdf;
-  const approveId = target.dataset.approvePdf;
-  const rejectId = target.dataset.rejectPdf;
-  const regenId = target.dataset.regenPdf;
-  const releaseId = target.dataset.releasePdf;
-  const testProvider = target.dataset.testProvider;
-  const detailSessionId = target.dataset.sessionDetail;
-  const retryDeadLetterId = target.dataset.retryDeadLetter;
-  const resolveDeadLetterId = target.dataset.resolveDeadLetter;
-  const campaignInvitesId = target.dataset.campaignInvites;
-  const pauseCampaignId = target.dataset.pauseCampaign;
-  const closeCampaignId = target.dataset.closeCampaign;
-  const revokeInviteId = target.dataset.revokeInvite;
+  if (!(target instanceof HTMLElement) || target.disabled) return;
+  const { previewPdf: previewId, approvePdf: approveId, rejectPdf: rejectId,
+    regenPdf: regenId, releasePdf: releaseId, validatePrint: validatePrintId, printQuote: printQuoteId, printOrder: printOrderId, testProvider,
+    sessionDetail: detailSessionId, retryDeadLetter: retryDeadLetterId,
+    resolveDeadLetter: resolveDeadLetterId, campaignInvites: campaignInvitesId,
+    pauseCampaign: pauseCampaignId, closeCampaign: closeCampaignId,
+    revokeInvite: revokeInviteId, bookJob: bookJobId, printJob: printJobId } = target.dataset;
 
+  if (bookJobId) { await loadBookJob(bookJobId); return; }
+  if (printJobId) { await loadPrintJob(printJobId); return; }
+  if (validatePrintId) { await validatePrint(validatePrintId); return; }
+  if (printQuoteId) { await openPrintQuote(printQuoteId); return; }
+  if (printOrderId) { await openPrintOrder(printOrderId); return; }
   if (campaignInvitesId) {
     if (inviteCampaignIdInput) inviteCampaignIdInput.value = campaignInvitesId;
     inviteCampaignIdInput?.focus();
     return;
   }
   if (pauseCampaignId || closeCampaignId) {
-    if (isShowcaseActionTarget(pauseCampaignId || closeCampaignId)) {
-      showShowcaseActionMessage();
-      return;
-    }
     await adminAction('adminUpdateAccessCampaign', {
       campaignId: pauseCampaignId || closeCampaignId,
       status: pauseCampaignId ? 'paused' : 'closed'
@@ -1464,19 +1422,16 @@ async function handleWorkspaceClick(event) {
     return;
   }
   if (revokeInviteId) {
-    if (isShowcaseActionTarget(revokeInviteId)) {
-      showShowcaseActionMessage();
-      return;
-    }
     const result = await adminAction('adminRevokeAccessInvite', { inviteId: revokeInviteId, reason: 'revocado desde back office' });
     if (viralInviteOutput) viralInviteOutput.textContent = JSON.stringify(result, null, 2);
     await refresh();
     return;
   }
   if (retryDeadLetterId) {
-    if (isShowcaseActionTarget(retryDeadLetterId)) {
-      showShowcaseActionMessage();
-      return;
+    const current = (latestDashboardData?.observability?.deadLetters || []).find(item => item.id === retryDeadLetterId);
+    if (!current || String(current.failed_action || current.failedAction || '').includes('book')
+      || current.error_code === 'provider_submission_uncertain' || current.diagnostic?.uncertain === true) {
+      throw new Error('Revise el proceso del libro antes de reintentar');
     }
     const result = await adminAction('adminRetryDeadLetter', { deadLetterId: retryDeadLetterId });
     showObservabilityReport(result);
@@ -1484,39 +1439,18 @@ async function handleWorkspaceClick(event) {
     return;
   }
   if (resolveDeadLetterId) {
-    if (isShowcaseActionTarget(resolveDeadLetterId)) {
-      showShowcaseActionMessage();
-      return;
-    }
     const result = await adminAction('adminResolveDeadLetter', { deadLetterId: resolveDeadLetterId, reason: 'resuelto desde back office' });
     showObservabilityReport(result);
     await refresh();
     return;
   }
   if (detailSessionId) {
-    const showcaseDetail = showcaseSessionDetail(detailSessionId);
-    if (showcaseDetail) {
-      renderSessionDetail(showcaseDetail);
-      setText(adminStatus, 'Detalle simulado cargado sin llamar al backend.');
-      return;
-    }
-    const result = await adminAction('adminSessionDetail', { sessionId: detailSessionId });
-    renderSessionDetail(result);
+    renderSessionDetail(await adminAction('adminSessionDetail', { sessionId: detailSessionId }));
     return;
   }
   if (previewId) {
-    const showcasePdf = dashboardItem('pdfs', previewId);
-    if (showcasePdf && isShowcaseItem(showcasePdf)) {
-      previewPdf(showcasePdf);
-      setText(adminStatus, 'PDF simulado seleccionado. No hay binario real asociado.');
-      return;
-    }
     const result = await adminAction('adminPdf', { pdfId: previewId });
     previewPdf(result.pdf);
-    return;
-  }
-  if ([approveId, rejectId, regenId, releaseId].some((id) => id && isShowcaseActionTarget(id))) {
-    showShowcaseActionMessage();
     return;
   }
   if (approveId) await adminAction('adminApprovePdf', { pdfId: approveId });
@@ -1524,7 +1458,6 @@ async function handleWorkspaceClick(event) {
   if (regenId) await adminAction('adminRegeneratePdf', { pdfId: regenId, reason: 'regeneracion solicitada' });
   if (releaseId) await adminAction('adminReleasePdf', { pdfId: releaseId });
   if (testProvider) await adminAction('adminTestProvider', { provider: testProvider });
-
   if (approveId || rejectId || regenId || releaseId || testProvider) await refresh();
 }
 
@@ -1637,6 +1570,8 @@ async function handleAccessInviteSubmit(event) {
 }
 
 async function handleProviderSubmit(event) {
+  const luluForm=event.target.closest('[data-lulu-credentials-form]');
+  if(luluForm)return handleLuluCredentialsSubmit(event,luluForm);
   const form = event.target.closest('[data-provider-form]');
   if (!form) return;
   event.preventDefault();
@@ -1645,6 +1580,39 @@ async function handleProviderSubmit(event) {
   await adminAction('adminSaveProviderKey', { provider, apiKey });
   form.reset();
   await refresh();
+}
+
+async function handleLuluCredentialsSubmit(event,form) {
+  event.preventDefault();
+  if(luluCredentialSavePending)return;
+  if(!providerPermission('adminSaveLuluCredentials'))throw new Error('No tiene permiso para guardar credenciales.');
+  const existing=latestDashboardData?.providers?.find(provider=>provider.provider==='lulu');
+  if(existing?.managedByEnvironment===true)throw new Error('Este par se gestiona en el servidor.');
+  const data=new FormData(form),input={environment:data.get('environment'),clientKey:data.get('clientKey'),clientSecret:data.get('clientSecret'),
+    saveConsent:data.get('saveConsent')==='yes',expectedRevision:form.dataset.expectedRevision||null,configurationId:crypto.randomUUID()};
+  if(!input.saveConsent||!['sandbox','production'].includes(input.environment)||
+    [input.clientKey,input.clientSecret].some(value=>typeof value!=='string'||!/^[\x21-\x7e]{1,2048}$/.test(value)))throw new Error('Complete el entorno, las dos claves y la autorización.');
+  const button=form.querySelector('button[type="submit"]');
+  const status=message=>{
+    setText(form.querySelector('[data-lulu-save-status]'),message);
+    setText(providerGrid?.querySelector?.('[data-lulu-save-status]'),message);setText(adminStatus,message);
+  };
+  luluCredentialSavePending=true;form.reset();form.setAttribute('aria-busy','true');if(button)button.disabled=true;
+  status('Guardando par OAuth. Aún sin confirmar.');
+  try{
+    const result=await adminAction('adminSaveLuluCredentials',input);
+    if(result?.ok!==true||result.provider?.configurationId!==input.configurationId||result.provider.configured!==true||
+      result.provider.environment!==input.environment)throw new Error();
+    await refresh();const saved=latestDashboardData?.providers?.find(provider=>provider.provider==='lulu');
+    if(saved?.configurationId!==input.configurationId||saved.configured!==true||saved.source!=='encrypted_oauth_pair'||
+      saved.environment!==input.environment)throw new Error();
+    status('Par OAuth guardado y releído. Conexión sin comprobar. No se han creado pedidos ni pagos.');
+  }catch{
+    status('Guardado de Lulu sin confirmar. Actualice el panel antes de decidir si debe volver a guardar.');
+    throw new Error('Guardado de Lulu sin confirmar. No se ha reintentado automáticamente.');
+  }finally{
+    luluCredentialSavePending=false;form.removeAttribute('aria-busy');if(button)button.disabled=false;
+  }
 }
 
 tokenForm?.addEventListener('submit', (event) => {
@@ -1656,6 +1624,17 @@ refreshButton?.addEventListener('click', () => {
   refresh().catch((error) => setText(adminStatus, error instanceof Error ? error.message : 'No se pudo actualizar'));
 });
 
+resumeBookButton?.addEventListener('click', () => {
+  changeBookJob('adminResumeBook').catch(error => setText(bookJobActionStatus, error instanceof Error ? error.message : 'No se pudo reanudar'));
+});
+
+cancelBookButton?.addEventListener('click', () => {
+  changeBookJob('adminCancelBook').catch(error => setText(bookJobActionStatus, error instanceof Error ? error.message : 'No se pudo cancelar'));
+});
+resumePrintButton?.addEventListener('click', () => changePrintJob('adminResumePrint').catch(error => setText(printJobActionStatus,error.message)));
+cancelPrintButton?.addEventListener('click', () => changePrintJob('adminCancelPrint').catch(error => setText(printJobActionStatus,error.message)));
+morePrintJobsButton?.addEventListener('click', () => morePrintJobs().catch(() => setText(printJobActionStatus,'No se pudo consultar la siguiente página de procesos.')));
+
 workspace?.addEventListener('click', (event) => {
   handleWorkspaceClick(event).catch((error) => setText(adminStatus, error instanceof Error ? error.message : 'La accion ha fallado'));
 });
@@ -1665,6 +1644,7 @@ workspace?.addEventListener('submit', (event) => {
 });
 
 accessToggleButton?.addEventListener('click', () => {
+  if (typeof latestDashboardData?.monitor?.access?.disabled !== 'boolean') return;
   const disabledNow = accessToggleButton.dataset.disabledNow === 'true';
   adminAction('adminToggleAccess', {
     disabled: !disabledNow,
@@ -1740,6 +1720,7 @@ privacyOpsForm?.addEventListener('submit', (event) => {
 });
 
 adminLogoutButton?.addEventListener('click', () => {
+  clearPrintQuote();
   signOut().catch(() => null);
   adminToken = '';
   sessionStorage.removeItem(ADMIN_TOKEN_KEY);
@@ -1747,16 +1728,58 @@ adminLogoutButton?.addEventListener('click', () => {
   if (adminPasswordInput) adminPasswordInput.value = '';
   if (adminGate) adminGate.hidden = false;
   if (workspace) workspace.hidden = true;
+  latestDashboardData = null;
+  if(providerGrid)providerGrid.innerHTML='';
+  selectedBookJobId = '';
+  selectedBookJobDetail = null;
+  selectedPrintJobId = '';selectedPrintJobDetail = null;printJobUnconfirmed = false;printJobsPageState = null;
+  renderPrintJobDetail(null);
+  if (pdfPreview) pdfPreview.removeAttribute('src');
+  if (coverPdfLink) { coverPdfLink.hidden = true; coverPdfLink.removeAttribute('href'); }
   setText(adminMode, 'Sesion cerrada');
+});
+
+printShippingOptionsButton?.addEventListener('click',()=>{
+  loadPrintShippingOptions().catch(error=>setText(printQuoteActionStatus,error instanceof Error?error.message:'No se pudo consultar Lulu.'));
+});
+printQuoteForm?.addEventListener('submit',event=>{
+  event.preventDefault();calculatePrintQuote().catch(error=>setText(printQuoteActionStatus,error instanceof Error?error.message:'No se pudo confirmar el presupuesto.'));
+});
+printQuoteForm?.addEventListener('input',event=>{
+  lastPrintQuotation=null;confirmedPrintQuoteInput=null;clearPrintOrder();
+  if(printPrepareOrderButton)printPrepareOrderButton.disabled=true;
+  if(event.target===printShippingLevel){setText(printQuoteSummary,'Envío modificado. Calcule el presupuesto de nuevo.');return;}
+  printShippingFingerprint=null;
+  if(printQuoteCalculateButton)printQuoteCalculateButton.disabled=true;
+  if(printShippingLevel)printShippingLevel.disabled=true;
+  setText(printQuoteSummary,'Datos modificados. Consulte las opciones y el presupuesto de nuevo.');
+});
+printPrepareOrderButton?.addEventListener('click',()=>openPrintOrder(selectedPrintPdfId).catch(error=>setText(printQuoteActionStatus,error.message)));
+printOrderApprovalForm?.addEventListener('submit',event=>{
+  event.preventDefault();printOrderAction('approve').catch(error=>setText(printOrderActionStatus,error.message));
+});
+for(const [action,node] of Object.entries(printOrderButtons))if(action!=='approve')node?.addEventListener('click',()=>{
+  printOrderAction(action).catch(error=>setText(printOrderActionStatus,error.message));
+});
+printPaymentPortal?.addEventListener('click',event=>{
+  if(selectedPrintOrder)renderPrintOrder(selectedPrintOrder);
+  if(printOrderBusy||printPaymentPortal.hidden)event.preventDefault();
 });
 
 if (getStoredUser() || adminToken) {
   tokenInput.value = adminToken;
   openPanel().catch((error) => setText(adminMode, error instanceof Error ? error.message : 'No se pudo restaurar la sesion'));
 } else {
-  setText(adminMode, hasBackendConfig() ? 'Backend: entra con usuario admin o token legacy' : 'Modo local: cualquier clave abre el panel');
+  setText(adminMode, hasBackendConfig() ? 'Backend: entra con usuario admin o token legacy' : 'Servidor sin configurar');
 }
 
 setInterval(() => {
-  if (!workspace?.hidden) refresh().catch(() => null);
+  if(selectedPrintOrder&&!printOrderBusy)renderPrintOrder(selectedPrintOrder);
+  if (!workspace?.hidden && !bookJobActionPending && !printQuoteBusy && !printOrderBusy && !printJobBusy && !printJobUnconfirmed && !printJobsPageBusy) {
+    refresh().then(async () => {
+      if (selectedBookJobId) await loadBookJob(selectedBookJobId);
+      if (selectedPrintJobId) await loadPrintJob(selectedPrintJobId);
+    })
+      .catch(error => setText(adminStatus, error instanceof Error ? error.message : 'No se pudo actualizar'));
+  }
 }, 15000);

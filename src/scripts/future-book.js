@@ -1,4 +1,5 @@
 import { callFunction } from './api-client.js?v=20260903-production-recovery';
+import { createCaptureStore, legacyCaptureId, validateCaptureReceipt } from './caronte-capture-store.js';
 import { hasBackendConfig } from './config.js';
 
 const STORAGE_KEY = 'future_book_sprint3_session';
@@ -14,6 +15,7 @@ const NAME_KEY = 'future_book_name';
 const CLIENT_BOOT_DELAY_MS = 10000;
 const CLIENT_STARTED_AT = Date.now();
 const MAX_CLIENT_AUDIO_BYTES = 24 * 1024 * 1024;
+const ANSWER_SAVE_TIMEOUT_MS = 180000;
 const INTERVIEW_HEARTBEAT_MS = 45000;
 const PAYMENT_COUNTDOWN_MS = 5 * 60 * 1000;
 const INTRO_AUDIO_TIMEOUT_MS = 200000;
@@ -228,12 +230,23 @@ let audioChunks = [];
 let recordingStartedAt = 0;
 let lastDurationSeconds = 0;
 let currentTranscript = '';
+let currentTranscriptFinal = false;
+let currentCaptureId = '';
+let currentCaptureSessionId = '';
+let currentAnswerPayload = null;
+let answerSavePending = false;
+let recordingStartPending = false;
+let recordingRequestId = '';
+const captureStore = createCaptureStore();
+let pendingMigrationPromise = null;
 let recognition = null;
 let browserSpeechSupported = false;
 let audioCaptured = false;
 let currentAudioMimeType = '';
 let enteredName = sessionStorage.getItem(NAME_KEY) || '';
 let entryStage = sessionStorage.getItem(ENTRY_STAGE_KEY) || 'payment';
+let bookStatusTimer = null;
+let pdfStatusTimer = null;
 let heartbeatTimer = null;
 let paymentCountdownTimer = null;
 let cachedClientFingerprint = '';
@@ -281,11 +294,11 @@ async function clientSecurityPayload() {
 }
 
 function clearFutureBookSessionState() {
+  resetCaptureState();
   sessionStorage.removeItem(STORAGE_KEY);
   sessionStorage.removeItem(ANSWERS_KEY);
   sessionStorage.removeItem(MANUSCRIPT_KEY);
   sessionStorage.removeItem(PDF_KEY);
-  localStorage.removeItem(PENDING_ANSWERS_KEY);
   sessionStorage.removeItem(NAME_KEY);
   sessionStorage.removeItem(ENTRY_STAGE_KEY);
   sessionStorage.removeItem(RITUAL_LOG_KEY);
@@ -501,28 +514,49 @@ function wordCount(text) {
   return String(text || '').split(/\s+/).map((word) => word.trim()).filter(Boolean).length;
 }
 
-function readPendingAnswers() {
-  try {
-    const rows = JSON.parse(localStorage.getItem(PENDING_ANSWERS_KEY) || '[]');
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
+async function migrateLegacyPendingAnswers() {
+  if (!pendingMigrationPromise) pendingMigrationPromise = (async () => {
+    const before = localStorage.getItem(PENDING_ANSWERS_KEY);
+    const rows = JSON.parse(before || '[]');
+    if (!Array.isArray(rows)) throw new Error('pending_queue_invalid');
+    const remaining = [];
+    for (const item of rows) {
+      if (!item?.sessionId || !Number.isInteger(item.questionIndex) || item.questionIndex < 1) { remaining.push(item); continue; }
+      const captureId = item.captureId || await legacyCaptureId(item);
+      await captureStore.put({ ...item, captureId });
+    }
+    // A crash or quota failure before this write retains the old source. Stable
+    // capture IDs make a later migration safe. Never erase another tab's update.
+    if (remaining.length !== rows.length && localStorage.getItem(PENDING_ANSWERS_KEY) === before) {
+      localStorage.setItem(PENDING_ANSWERS_KEY, JSON.stringify(remaining));
+    }
+  })();
+  try { await pendingMigrationPromise; } finally { pendingMigrationPromise = null; }
+}
+
+async function readPendingAnswers(allSessions = false, sessionId = currentSession?.id) {
+  await migrateLegacyPendingAnswers();
+  return captureStore.list(allSessions ? null : sessionId || '');
+}
+
+async function queuePendingAnswer(payload) {
+  const sessionId = payload.sessionId || currentSession?.id;
+  if (!sessionId) throw new Error('pending_answer_session_missing');
+  return captureStore.put({ ...payload, sessionId, captureId: payload.captureId || crypto.randomUUID() });
+}
+
+async function removePendingAnswer(_questionIndex, sessionId = currentSession?.id, captureId = '') {
+  await captureStore.acknowledge(sessionId, captureId);
+}
+
+async function answerForTransport(payload) {
+  const { audioBlob, queuedAt: _queuedAt, ...answer } = payload;
+  if (audioBlob) {
+    if (audioBlob.size > MAX_CLIENT_AUDIO_BYTES) throw new Error('audio_too_large');
+    answer.audioBase64 = await blobToBase64(audioBlob);
+    answer.audioByteLength = audioBlob.size;
   }
-}
-
-function writePendingAnswers(rows) {
-  localStorage.setItem(PENDING_ANSWERS_KEY, JSON.stringify(rows.slice(-8)));
-}
-
-function queuePendingAnswer(payload) {
-  const queue = readPendingAnswers();
-  const withoutSameQuestion = queue.filter((item) => item.questionIndex !== payload.questionIndex);
-  withoutSameQuestion.push({ ...payload, queuedAt: new Date().toISOString() });
-  writePendingAnswers(withoutSameQuestion);
-}
-
-function removePendingAnswer(questionIndex) {
-  writePendingAnswers(readPendingAnswers().filter((item) => item.questionIndex !== questionIndex));
+  return answer;
 }
 
 function preferredAudioMimeType() {
@@ -550,7 +584,7 @@ async function currentAudioPayload() {
     throw new Error('audio_too_large');
   }
   return {
-    audioBase64: await blobToBase64(blob),
+    audioBlob: blob,
     audioByteLength: blob.size
   };
 }
@@ -945,8 +979,24 @@ function makeLocalPdf(manuscriptPayload) {
 }
 
 function resetCaptureState(message = 'habla. si el navegador falla, quedara audio pendiente.') {
+  currentCaptureId = '';
+  currentCaptureSessionId = '';
+  recordingRequestId = '';
+  recordingStartPending = false;
+  const oldRecognition = recognition;
+  const oldRecorder = mediaRecorder;
+  recognition = null;
+  mediaRecorder = null;
+  try { oldRecognition?.abort(); } catch { /* Capture callbacks are already invalidated. */ }
+  try { if (oldRecorder?.state === 'recording') oldRecorder.stop(); } catch { /* Always release tracks below. */ }
+  oldRecorder?.stream?.getTracks().forEach(track => track.stop());
+  voiceOrb?.classList.remove('is-recording');
   clearQuestionAudioCache();
   currentTranscript = '';
+  currentTranscriptFinal = false;
+  currentCaptureId = '';
+  currentCaptureSessionId = '';
+  currentAnswerPayload = null;
   audioChunks = [];
   audioCaptured = false;
   lastDurationSeconds = 0;
@@ -954,7 +1004,7 @@ function resetCaptureState(message = 'habla. si el navegador falla, quedara audi
   currentFollowUp = false;
   setText(liveTranscript, message);
   setText(answerMeta, 'mic pendiente.');
-  if (recordAnswerButton) recordAnswerButton.hidden = false;
+  if (recordAnswerButton) { recordAnswerButton.hidden = false; recordAnswerButton.disabled = false; }
   if (stopRecordingButton) stopRecordingButton.hidden = true;
   if (saveAnswerButton) saveAnswerButton.disabled = true;
 }
@@ -965,7 +1015,7 @@ async function recordInterviewHeartbeat(stage = 'active') {
   await futureAction('recordInterviewHeartbeat', {
     stage,
     currentQuestionIndex: currentQuestion?.index || null,
-    pendingAnswerQueueSize: readPendingAnswers().length
+    pendingAnswerQueueSize: (await readPendingAnswers()).length
   }).catch(() => null);
 }
 
@@ -977,18 +1027,32 @@ function startInterviewHeartbeat() {
 }
 
 async function flushPendingAnswerQueue() {
-  if (!currentSession?.id || !hasBackendConfig() || currentSession.mode === 'local') return null;
-  const queue = readPendingAnswers();
-  if (!queue.length) return null;
+  if (answerSavePending || !currentSession?.id || !hasBackendConfig() || currentSession.mode === 'local') return null;
+  const sessionId = currentSession.id;
   let lastResult = null;
-  for (const item of queue) {
-    const result = await futureAction('saveAnswer', {
-      ...item,
-      retryFromQueue: true,
-      localPatch: { status: 'interview_active' }
-    });
-    if (result.saved) removePendingAnswer(item.questionIndex);
-    lastResult = result;
+  answerSavePending = true;
+  try {
+    const queue = await readPendingAnswers(false, sessionId);
+    for (const item of queue) {
+      if (currentSession?.id !== sessionId) return null;
+      const answer = await answerForTransport(item);
+      if (currentSession?.id !== sessionId) return null;
+      const result = await futureAction('saveAnswer', {
+        ...answer,
+        sessionId,
+        retryFromQueue: true,
+        localPatch: { status: 'interview_active' }
+      });
+      if (currentSession?.id !== sessionId) return null;
+      const acknowledged = await validateCaptureReceipt(result, item);
+      if (currentSession?.id !== sessionId) return null;
+      if (acknowledged) await removePendingAnswer(item.questionIndex, sessionId, item.captureId);
+      if (currentSession?.id !== sessionId) return null;
+      lastResult = result;
+      if (result.saved !== true) break;
+    }
+  } finally {
+    answerSavePending = false;
   }
   return lastResult;
 }
@@ -1166,7 +1230,8 @@ async function futureAction(action, payload = {}) {
   const timeoutMs = action === 'synthesizeQuestion' && Number(payload.questionIndex) === 0
     ? INTRO_AUDIO_TIMEOUT_MS
     : action === 'synthesizeQuestion' ? 75000
-    : action === 'generateBook' ? 180000
+    : action === 'saveAnswer' ? ANSWER_SAVE_TIMEOUT_MS
+    : action === 'generateBook' ? ACTION_REQUEST_TIMEOUT_MS
     : entryActions.includes(action) ? ENTRY_REQUEST_TIMEOUT_MS : ACTION_REQUEST_TIMEOUT_MS;
   return callFunction('future-book-session', {
     action,
@@ -1181,7 +1246,7 @@ async function recoverBackendSession(stored) {
   if (!hasBackendConfig() || stored?.mode !== 'local') return stored;
   // Do not switch away from material captured during an outage without
   // reconciling it first, even if an older copy of the session exists remotely.
-  if (readLocalAnswers().length || readPendingAnswers().length || readLocalManuscript()) {
+  if (readLocalAnswers().length || (await readPendingAnswers(false, stored.id)).length || readLocalManuscript()) {
     throw new Error('La sesion guardada es local. Tus respuestas se conservan; no se han enviado al servidor.');
   }
   try {
@@ -1201,24 +1266,41 @@ async function recoverBackendSession(stored) {
 async function ensureSession() {
   if (!hasBackendConfig() && !IS_LOCAL_PREVIEW) throw new Error('backend_config_missing');
   const inviteToken = syncAccessToken();
-  const stored = await recoverBackendSession(readStoredSession());
+  let stored = await recoverBackendSession(readStoredSession());
   if (stored?.id && stored?.publicToken) {
     currentSession = stored;
     setText(sessionStatus, `Sesion ${String(stored.id).slice(0, 8)}`);
     note('session_recovered');
-    await flushPendingAnswerQueue().catch(() => null);
-    if (['pending_review', 'approved', 'released_to_customer', 'blocked'].includes(stored.status) || stored.pdfReviewStatus === 'pending_review') {
+    const recoveredAnswer = await flushPendingAnswerQueue().catch(() => null);
+    if (recoveredAnswer?.session?.id === stored.id) {
+      saveSession(recoveredAnswer.session, stored.mode || 'backend');
+      stored = currentSession;
+    }
+    if (['book_generating', 'blocked'].includes(stored.status)) {
+      const result = await futureAction('getBookStatus');
+      if (result.job && result.job.status !== 'ready') {
+        saveSession(result.session || stored, stored.mode || 'backend');
+        displayBookResult(result);
+        return;
+      }
+      if (!result.manuscript) {
+        showComplete();
+        note(stored.status === 'blocked' ? 'book_engine / review_required' : 'book_engine / recovery_required');
+        return;
+      }
+    }
+    if (['pdf_generating', 'pending_review', 'approved', 'released_to_customer', 'blocked'].includes(stored.status) || stored.pdfReviewStatus === 'pending_review') {
       const bookResult = await futureAction('getBookStatus');
       const pdfResult = await futureAction('getPdfStatus');
       saveSession(pdfResult.session || bookResult.session || stored, stored.mode || 'backend');
-      showBook(bookResult.manuscript || readLocalManuscript(), pdfResult.pdf || readLocalPdf());
+      displayPdfResult(pdfResult, bookResult.manuscript || readLocalManuscript());
       return;
     }
     if (stored.status === 'book_ready' || stored.bookStatus === 'ready') {
       const result = await futureAction('getBookStatus');
       saveSession(result.session || stored, stored.mode || 'backend');
       const pdfResult = await futureAction('getPdfStatus').catch(() => ({ pdf: null }));
-      if (result.manuscript) showBook(result.manuscript, pdfResult.pdf);
+      if (result.manuscript) displayPdfResult(pdfResult, result.manuscript);
       else showComplete();
       return;
     }
@@ -1236,7 +1318,10 @@ async function ensureSession() {
     }
     if (stored.status === 'interview_active') {
       const result = await futureAction('getCurrentQuestion');
+      if (result.session) saveSession(result.session, stored.mode || 'backend');
+      if (result.completed) { showComplete(); return; }
       currentQuestion = result.question || currentQuestion;
+      currentFollowUp = currentQuestion.followUp === true;
       showInterview();
       startInterviewHeartbeat();
       return;
@@ -1650,7 +1735,7 @@ function showBook(manuscriptPayload, pdf = null) {
   setText(bookTitle, manuscriptPayload?.title || manuscript.title || 'manuscrito generado');
   setText(
     bookQuality,
-    `score=${manuscriptPayload?.qualityScore || report.score || 'n/a'} / pages=${pageTarget.estimated_current_pages || 'n/a'} target_${pageTarget.min || 35}_${pageTarget.max || 60} / ${manuscriptPayload?.providerChain?.drafting || 'local'}`
+    `score=${manuscriptPayload?.qualityScore || report.score || 'n/a'} / pages=${pageTarget.estimated_current_pages || 'n/a'} target_${pageTarget.min || 180}_${pageTarget.max || 200} / ${manuscriptPayload?.providerChain?.drafting || 'n/a'}`
   );
   renderBookSections(manuscriptPayload);
   renderPdfState(pdf);
@@ -2046,67 +2131,103 @@ function setupRecognition() {
   instance.lang = 'es-ES';
   instance.interimResults = true;
   instance.continuous = true;
+  const captureId = currentCaptureId;
+  const sessionId = currentCaptureSessionId;
+  const questionIndex = currentQuestion.index;
+  const ownsCapture = () => captureId && currentCaptureId === captureId && currentSession?.id === sessionId && currentQuestion.index === questionIndex;
   instance.onresult = (event) => {
+    if (!ownsCapture()) return;
     const transcript = [...event.results]
       .map((result) => result[0]?.transcript || '')
       .join(' ')
       .trim();
     currentTranscript = transcript;
+    currentTranscriptFinal = Boolean(transcript && [...event.results].every(result => result.isFinal === true));
     setText(liveTranscript, transcript || 'listening...');
   };
   instance.onerror = () => {
+    if (!ownsCapture()) return;
+    currentTranscriptFinal = false;
     setText(answerMeta, 'transcript_fail / audio_pending.');
   };
   return instance;
 }
 
 async function startRecording() {
+  if (recordingStartPending || answerSavePending || mediaRecorder?.state === 'recording') return;
   if (!navigator.mediaDevices?.getUserMedia) {
     setText(answerMeta, 'browser_denied_mic.');
     return;
   }
 
-  currentTranscript = '';
-  audioChunks = [];
-  audioCaptured = false;
-  lastDurationSeconds = 0;
-  setText(liveTranscript, 'listening...');
-  saveAnswerButton.disabled = true;
-
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  currentAudioMimeType = preferredAudioMimeType();
-  mediaRecorder = new MediaRecorder(stream, currentAudioMimeType ? { mimeType: currentAudioMimeType } : undefined);
-  mediaRecorder.ondataavailable = (event) => {
-    if (event.data?.size) audioChunks.push(event.data);
-  };
-  mediaRecorder.onstop = () => {
-    stream.getTracks().forEach((track) => track.stop());
-    audioCaptured = audioChunks.length > 0;
-    lastDurationSeconds = Math.max(1, Math.round((Date.now() - recordingStartedAt) / 1000));
-    voiceOrb?.classList.remove('is-recording');
-    recordAnswerButton.hidden = false;
-    stopRecordingButton.hidden = true;
-    saveAnswerButton.disabled = false;
-    if (!currentTranscript) {
-      currentTranscript = `[Audio capturado: ${lastDurationSeconds} segundos. Transcripcion pendiente en backend.]`;
-      setText(liveTranscript, currentTranscript);
-    }
-    setText(answerMeta, `captured / ${lastDurationSeconds}s.`);
-  };
-
-  recognition = setupRecognition();
+  const sessionId = currentSession?.id;
+  const questionIndex = currentQuestion.index;
+  const requestId = crypto.randomUUID();
+  recordingRequestId = requestId;
+  recordingStartPending = true;
+  recordAnswerButton.disabled = true;
+  let stream;
+  let started = false;
   try {
-    recognition?.start();
-  } catch {
-    recognition = null;
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (recordingRequestId !== requestId || currentSession?.id !== sessionId || currentQuestion.index !== questionIndex) return;
+    const mimeType = preferredAudioMimeType();
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    const chunks = [];
+    const startedAt = Date.now();
+    const ownsCapture = () => currentCaptureId === requestId && currentSession?.id === sessionId && currentQuestion.index === questionIndex;
+    recorder.ondataavailable = (event) => {
+      if (ownsCapture() && event.data?.size) chunks.push(event.data);
+    };
+    recorder.onstop = () => {
+      stream.getTracks().forEach(track => track.stop());
+      if (!ownsCapture()) return;
+      audioCaptured = chunks.length > 0;
+      lastDurationSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      voiceOrb?.classList.remove('is-recording');
+      recordAnswerButton.hidden = false;
+      stopRecordingButton.hidden = true;
+      saveAnswerButton.disabled = !(audioCaptured || (currentTranscriptFinal && currentTranscript));
+      if (!currentTranscript && audioCaptured) {
+        currentTranscript = `[Audio capturado: ${lastDurationSeconds} segundos. Transcripcion pendiente en backend.]`;
+        setText(liveTranscript, currentTranscript);
+      }
+      setText(answerMeta, `captured / ${lastDurationSeconds}s.`);
+    };
+    recorder.start();
+    started = true;
+    try { recognition?.abort(); } catch { /* The new capture owns subsequent callbacks. */ }
+    currentCaptureId = requestId;
+    currentCaptureSessionId = sessionId;
+    currentTranscript = '';
+    currentTranscriptFinal = false;
+    currentAnswerPayload = null;
+    currentAudioMimeType = mimeType;
+    audioChunks = chunks;
+    audioCaptured = false;
+    lastDurationSeconds = 0;
+    recordingStartedAt = startedAt;
+    mediaRecorder = recorder;
+    setText(liveTranscript, 'listening...');
+    saveAnswerButton.disabled = true;
+    try {
+      recognition = setupRecognition();
+      recognition?.start();
+    } catch {
+      recognition = null;
+      browserSpeechSupported = false;
+    }
+    voiceOrb?.classList.add('is-recording');
+    recordAnswerButton.hidden = true;
+    stopRecordingButton.hidden = false;
+    setText(answerMeta, browserSpeechSupported ? 'rec / transcript_live.' : 'rec / transcript_pending.');
+  } finally {
+    if (!started) stream?.getTracks().forEach(track => track.stop());
+    if (recordingRequestId === requestId) {
+      recordingStartPending = false;
+      recordAnswerButton.disabled = false;
+    }
   }
-
-  recordingStartedAt = Date.now();
-  mediaRecorder.start();
-  voiceOrb?.classList.add('is-recording');
-  recordAnswerButton.hidden = true;
-  stopRecordingButton.hidden = false;
-  setText(answerMeta, browserSpeechSupported ? 'rec / transcript_live.' : 'rec / transcript_pending.');
 }
 
 function stopRecording() {
@@ -2119,38 +2240,69 @@ function stopRecording() {
 }
 
 async function saveAnswer() {
+  if (answerSavePending) return;
+  const sessionId = currentCaptureSessionId || currentSession?.id;
+  if (!sessionId || currentSession?.id !== sessionId) throw new Error('capture_session_changed');
+  const questionIndex = currentQuestion.index;
+  const captureId = currentCaptureId || crypto.randomUUID();
+  currentCaptureId = captureId;
+  currentCaptureSessionId = sessionId;
+  answerSavePending = true;
   saveAnswerButton.disabled = true;
-  const transcriptIsPending = currentTranscript.startsWith('[Audio capturado:');
-  const audioPayload = await currentAudioPayload();
-  const answerPayload = {
-    questionIndex: currentQuestion.index,
-    questionText: currentQuestion.text,
-    transcript: currentTranscript,
-    transcriptSource: transcriptIsPending ? 'pending' : 'browser',
-    durationSeconds: lastDurationSeconds,
-    audioMimeType: currentAudioMimeType || 'audio/webm',
-    audioBase64: audioPayload.audioBase64,
-    audioByteLength: audioPayload.audioByteLength,
-    audioCaptured,
-    browserSpeechSupported,
-    transcriptionFinal: !transcriptIsPending,
-    followUpAttempt: currentFollowUp,
-    qualityScore: transcriptIsPending ? 0.15 : 0.62,
-    localPatch: { status: 'interview_active' }
-  };
-
-  let result;
   try {
-    result = await futureAction('saveAnswer', answerPayload);
-    removePendingAnswer(currentQuestion.index);
+    if (!currentAnswerPayload || currentAnswerPayload.captureId !== captureId) {
+      const audioPayload = await currentAudioPayload();
+      if (currentSession?.id !== sessionId || currentQuestion.index !== questionIndex || currentCaptureId !== captureId) return;
+      const transcriptIsPending = currentTranscript.startsWith('[Audio capturado:') || !currentTranscriptFinal;
+      currentAnswerPayload = {
+        sessionId, captureId, questionIndex, questionText: currentQuestion.text,
+        transcript: currentTranscript, transcriptSource: transcriptIsPending ? 'pending' : 'browser',
+        durationSeconds: lastDurationSeconds, audioMimeType: currentAudioMimeType || 'audio/webm',
+        ...(audioPayload.audioBlob ? { audioBlob: audioPayload.audioBlob } : { audioBase64: audioPayload.audioBase64 }), audioByteLength: audioPayload.audioByteLength,
+        audioCaptured, browserSpeechSupported, transcriptionFinal: !transcriptIsPending,
+        followUpAttempt: currentFollowUp, qualityScore: transcriptIsPending ? 0.15 : 0.62,
+        localPatch: { status: 'interview_active' }
+      };
+    }
+    const answerPayload = currentAnswerPayload;
+    let queued = false;
+    try { queued = (await queuePendingAnswer(answerPayload))?.acknowledged !== true; } catch { /* Audio remains in memory, not falsely in a durable queue. */ }
+    if (currentSession?.id !== sessionId || currentCaptureId !== captureId) return;
+    let result;
+    try {
+      const answer = await answerForTransport(answerPayload);
+      if (currentSession?.id !== sessionId || currentCaptureId !== captureId) return;
+      result = await futureAction('saveAnswer', answer);
+    } catch (error) {
+      if (currentSession?.id !== sessionId || currentCaptureId !== captureId) return;
+      saveAnswerButton.disabled = false;
+      setText(answerMeta, queued ? 'network_fail / answer_queued_retry.' : 'Respuesta solo en memoria. No cierre ni recargue la página; vuelva a guardar.');
+      note(error instanceof Error ? `save_failed / ${error.message}` : 'save_failed');
+      return;
+    }
+    if (currentSession?.id !== sessionId || currentCaptureId !== captureId) return;
+    const acknowledged = await validateCaptureReceipt(result, answerPayload);
+    if (currentSession?.id !== sessionId || currentCaptureId !== captureId) return;
+    if (!acknowledged) {
+      saveAnswerButton.disabled = false;
+      setText(answerMeta, queued ? `answer_not_saved / ${result.errorCode || 'confirmation_pending'} / retry.` : 'Respuesta solo en memoria. No cierre ni recargue la página; vuelva a guardar.');
+      return;
+    }
+    if (queued) await removePendingAnswer(questionIndex, sessionId, captureId);
+    if (currentSession?.id !== sessionId || currentCaptureId !== captureId) return;
+    await applyAnswerReceipt(result);
   } catch (error) {
-    queuePendingAnswer(answerPayload);
+    if (currentSession?.id !== sessionId || currentCaptureId !== captureId) return;
     saveAnswerButton.disabled = false;
-    setText(answerMeta, 'network_fail / answer_queued_retry.');
-    note(error instanceof Error ? `save_failed / ${error.message}` : 'save_failed');
-    return;
+    setText(answerMeta, 'Guardado sin confirmar. La respuesta se conserva; vuelva a guardar.');
+    note(error instanceof Error ? error.message : 'answer_receipt_unconfirmed');
+  } finally {
+    answerSavePending = false;
   }
+}
 
+async function applyAnswerReceipt(result) {
+  if (result?.session?.id !== currentSession?.id) throw new Error('answer_receipt_session_mismatch');
   if (result.answer?.transcript) {
     currentTranscript = result.answer.transcript;
     setText(liveTranscript, currentTranscript);
@@ -2161,11 +2313,17 @@ async function saveAnswer() {
 
   if (result.needsFollowUp && result.question) {
     currentQuestion = result.question;
-    currentFollowUp = true;
     saveSession(result.session || currentSession, currentSession.mode || 'backend');
     resetCaptureState('followup_required / answer_too_short');
+    currentFollowUp = true;
     showInterview();
     await startQuestionAudioFlow();
+    return;
+  }
+
+  if (result.saved !== true) {
+    saveAnswerButton.disabled = false;
+    setText(answerMeta, `answer_not_saved / ${result.errorCode || 'confirmation_pending'} / retry.`);
     return;
   }
 
@@ -2179,6 +2337,7 @@ async function saveAnswer() {
   if (result.nextQuestion) {
     currentQuestion = result.nextQuestion;
     resetCaptureState();
+    currentFollowUp = currentQuestion.followUp === true;
     showInterview();
     await startQuestionAudioFlow();
     return;
@@ -2194,9 +2353,10 @@ async function beginInterview() {
     localPatch: { status: 'interview_active', interviewStartedAt: new Date().toISOString() }
   });
   saveSession(result.session, currentSession.mode || 'backend');
+  if (result.completed) { showComplete(); return; }
   currentQuestion = result.question || currentQuestion;
-  currentFollowUp = false;
   resetCaptureState();
+  currentFollowUp = currentQuestion.followUp === true;
   showInterview();
   startInterviewHeartbeat();
   await startQuestionAudioFlow();
@@ -2204,26 +2364,127 @@ async function beginInterview() {
 
 async function generateBook() {
   if (!generateBookButton) return;
+  const sessionId = currentSession?.id;
   generateBookButton.disabled = true;
   note('book_engine / drafting');
   setStep('stage 05/05', 'book_engine', '94%');
   const result = await futureAction('generateBook', {
     localPatch: { status: 'book_generating', bookStatus: 'generating' }
   });
+  if (currentSession?.id !== sessionId) return;
   saveSession(result.session || currentSession, currentSession.mode || 'backend');
-  showBook(result.manuscript, null);
+  displayBookResult(result);
+}
+
+function scheduleBookStatus(sessionId, delay = 10000) {
+  if (bookStatusTimer) window.clearTimeout(bookStatusTimer);
+  bookStatusTimer = window.setTimeout(() => pollBookStatus(sessionId), delay);
+}
+
+function displayBookResult(result) {
+  if (bookStatusTimer) window.clearTimeout(bookStatusTimer);
+  bookStatusTimer = null;
+  if (result.manuscript && (!result.job || result.job.status === 'ready')) {
+    showBook(result.manuscript, null);
+    return;
+  }
+  showComplete();
+  const job = result.job;
+  if (!job || job.status === 'ready') {
+    note('book_engine / manuscript_not_available');
+    return;
+  }
+  if (generateBookButton) generateBookButton.disabled = true;
+  if (job.status === 'blocked' || job.status === 'cancelled') {
+    note(`book_engine / ${job.errorCode || job.status}`);
+    return;
+  }
+  const progress = Math.max(0, Math.min(95, Number(job.progress) || 0));
+  setStep('stage 05/05', 'book_engine', `${88 + progress * 0.11}%`);
+  note(`book_engine / ${job.stage || 'queued'} / ${progress}%`);
+  scheduleBookStatus(currentSession.id);
+}
+
+async function pollBookStatus(sessionId) {
+  if (currentSession?.id !== sessionId) return;
+  try {
+    const result = await futureAction('getBookStatus');
+    if (currentSession?.id !== sessionId) return;
+    saveSession(result.session || currentSession, currentSession.mode || 'backend');
+    displayBookResult(result);
+  } catch {
+    if (currentSession?.id !== sessionId) return;
+    note('book_engine / reconnecting');
+    scheduleBookStatus(sessionId, 20000);
+  }
 }
 
 async function generatePdf() {
   if (!generatePdfButton) return;
+  const sessionId = currentSession?.id;
   generatePdfButton.disabled = true;
   note('pdf_engine / layout');
   const result = await futureAction('generatePdf', {
     localPatch: { status: 'pdf_generating', pdfReviewStatus: 'not_generated' }
   });
+  if (currentSession?.id !== sessionId) return;
+  if (result.session?.id && result.session.id !== sessionId) throw new Error('pdf_receipt_scope');
   saveSession(result.session || currentSession, currentSession.mode || 'backend');
   const bookResult = await futureAction('getBookStatus').catch(() => ({ manuscript: readLocalManuscript() }));
-  showBook(bookResult.manuscript || readLocalManuscript(), result.pdf);
+  if (currentSession?.id !== sessionId) return;
+  displayPdfResult(result, bookResult.manuscript || readLocalManuscript());
+}
+
+function schedulePdfStatus(sessionId, manuscriptPayload, delay = 10000) {
+  if (pdfStatusTimer) window.clearTimeout(pdfStatusTimer);
+  pdfStatusTimer = window.setTimeout(() => pollPdfStatus(sessionId, manuscriptPayload), delay);
+}
+
+function displayPdfResult(result, manuscriptPayload) {
+  if (pdfStatusTimer) window.clearTimeout(pdfStatusTimer);
+  pdfStatusTimer = null;
+  const sessionId = currentSession?.id;
+  if ((result.session?.id && result.session.id !== sessionId) ||
+      (result.pdf?.sessionId && result.pdf.sessionId !== sessionId)) throw new Error('pdf_receipt_scope');
+  if (manuscriptPayload) showBook(manuscriptPayload, result.pdf);
+  else renderPdfState(result.pdf);
+  const job = result.job;
+  if (!job) {
+    if (generatePdfButton) generatePdfButton.disabled = false;
+    return;
+  }
+  if (generatePdfButton) generatePdfButton.disabled = true;
+  if (job.status === 'ready') {
+    note(result.pdf ? `pdf_${result.pdf.reviewStatus || 'pending_review'}` : 'pdf_engine / bundle_not_available');
+    return;
+  }
+  if (['blocked','cancelled'].includes(job.status)) {
+    note(`pdf_engine / ${job.errorCode || job.status}`);
+    return;
+  }
+  if (!['queued','running'].includes(job.status)) {
+    note('pdf_engine / status_unknown');
+    return;
+  }
+  const progress = Math.max(0, Math.min(98, Number(job.progress) || 0));
+  setStep('stage 05/05', 'pdf_engine', `${progress}%`);
+  note(`pdf_engine / ${job.stage || 'queued'} / ${progress}%`);
+  schedulePdfStatus(sessionId, manuscriptPayload);
+}
+
+async function pollPdfStatus(sessionId, manuscriptPayload) {
+  if (currentSession?.id !== sessionId) return;
+  try {
+    const result = await futureAction('getPdfStatus');
+    if (currentSession?.id !== sessionId) return;
+    if (result.session?.id && result.session.id !== sessionId) throw new Error('pdf_receipt_scope');
+    saveSession(result.session || currentSession, currentSession.mode || 'backend');
+    displayPdfResult(result, manuscriptPayload);
+  } catch {
+    if (currentSession?.id !== sessionId) return;
+    note('pdf_engine / reconnecting');
+    schedulePdfStatus(sessionId, manuscriptPayload, 20000);
+  }
 }
 
 function downloadBase64Pdf(pdf) {
@@ -2330,10 +2591,8 @@ resetBookButton?.addEventListener('click', resetFlow);
 
 window.addEventListener('online', () => {
   flushPendingAnswerQueue()
-    .then((result) => {
-      if (result?.session) saveSession(result.session, currentSession?.mode || 'backend');
-      if (result?.nextQuestion) currentQuestion = result.nextQuestion;
-      if (result?.completed) showComplete();
+    .then(async (result) => {
+      if (result?.session?.id === currentSession?.id) await applyAnswerReceipt(result);
     })
     .catch(() => null);
 });

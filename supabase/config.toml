@@ -91,3 +91,4 @@ verify_jwt = false
 
 [functions.future-book-session]
 verify_jwt = false
+static_files = [ "./functions/future-book-session/fonts/*.ttf", "./functions/future-book-session/fonts/OFL.txt" ]

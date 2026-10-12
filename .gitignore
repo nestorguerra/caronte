@@ -12,3 +12,5 @@ __MACOSX/
 coverage/
 supabase/.temp/
 scripts/voice-previews/
+output/pdf/
+tmp/pdfs/

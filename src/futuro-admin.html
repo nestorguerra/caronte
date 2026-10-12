@@ -60,11 +60,6 @@
         </div>
       </div>
 
-      <section class="demo-banner" id="demoBanner" hidden>
-        <strong>Produccion simulada</strong>
-        <span>Datos fake de volumen para ver el back office en plena operacion. No se guardan ni se envian al backend. Usa ?real=1 para ver solo datos reales.</span>
-      </section>
-
       <section class="ops-overview" aria-label="Resumen operativo">
         <div class="ops-hero">
           <span>Operacion Caronte</span>
@@ -356,6 +351,45 @@
         </div>
       </section>
 
+      <section class="admin-panel" aria-label="Proceso de escritura">
+        <div class="panel-title"><div><h2>Libros en proceso</h2><span id="bookRuntimeStatus">Sin sincronizar.</span></div></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Sesión</th><th>Estado</th><th>Etapa</th><th>Error</th><th>Actualizado</th><th>Acciones</th></tr></thead>
+          <tbody id="bookJobsBody"></tbody>
+        </table></div>
+        <p id="bookJobSummary">Sin trabajo seleccionado.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Paso</th><th>Estado</th><th>Modelo</th><th>Intento</th><th>Petición</th><th>Consumo</th><th>Diagnóstico</th></tr></thead>
+          <tbody id="bookJobStepsBody"></tbody>
+        </table></div>
+        <label><span>Motivo de la intervención</span><input id="bookJobReasonInput" minlength="8" maxlength="1000" autocomplete="off" placeholder="Causa corregida o motivo de cancelación"></label>
+        <div class="panel-actions">
+          <button type="button" id="resumeBookButton" disabled>Reanudar escritura</button>
+          <button type="button" id="cancelBookButton" class="secondary" disabled>Cancelar trabajo bloqueado</button>
+        </div>
+        <p id="bookJobActionStatus" role="status">Seleccione un proceso para consultar sus opciones.</p>
+      </section>
+
+      <section class="admin-panel" aria-label="Preparación de imprenta">
+        <div class="panel-title"><div><h2>PDF en proceso</h2><span>Interior y cubierta. Sin pedidos ni pagos.</span></div></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Sesión</th><th>Versión</th><th>Estado</th><th>Etapa</th><th>Error</th><th>Acciones</th></tr></thead>
+          <tbody id="printJobsBody"></tbody>
+        </table></div>
+        <button type="button" id="morePrintJobsButton" class="secondary" hidden>Cargar más procesos PDF</button>
+        <p id="printJobSummary">Sin proceso seleccionado.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Paso</th><th>Estado</th><th>Intento</th><th>Huella del recibo</th><th>Error</th></tr></thead>
+          <tbody id="printJobStepsBody"></tbody>
+        </table></div>
+        <label><span>Motivo de la intervención en PDF</span><input id="printJobReasonInput" minlength="8" maxlength="1000" autocomplete="off" placeholder="Causa corregida o motivo de cancelación"></label>
+        <div class="panel-actions">
+          <button type="button" id="resumePrintButton" disabled>Reanudar PDF</button>
+          <button type="button" id="cancelPrintButton" class="secondary" disabled>Cancelar PDF bloqueado</button>
+        </div>
+        <p id="printJobActionStatus" role="status">Cancelar conserva las etapas y los archivos. No cancela pedidos de Lulu.</p>
+      </section>
+
       <section class="admin-panel" data-queue="pdf_review_queue">
         <div class="panel-title">
           <div>
@@ -377,6 +411,51 @@
             <tbody id="pdfBody"></tbody>
           </table>
         </div>
+        <p id="printValidationStatus" role="status">La validación de archivos no crea pedidos ni realiza pagos.</p>
+      </section>
+
+      <section class="admin-panel" id="printQuotePanel" hidden>
+        <div class="panel-title"><div><h2>Presupuesto de impresión</h2><span id="printQuoteBook">Sin libro seleccionado</span></div></div>
+        <form id="printQuoteForm">
+          <div class="auth-grid">
+            <label><span>Destinatario</span><input id="printAddressName" maxlength="35" required autocomplete="off"></label>
+            <label><span>Email de entrega</span><input id="printAddressEmail" type="email" maxlength="254" required autocomplete="off"></label>
+            <label><span>Dirección</span><input id="printAddressStreet1" maxlength="30" required autocomplete="off"></label>
+            <label><span>Dirección, segunda línea</span><input id="printAddressStreet2" maxlength="30" autocomplete="off"></label>
+            <label><span>Ciudad</span><input id="printAddressCity" maxlength="30" required autocomplete="off"></label>
+            <label><span>Código postal</span><input id="printAddressPostcode" maxlength="64" required autocomplete="off"></label>
+            <label><span>País, código de dos letras</span><input id="printAddressCountry" maxlength="2" pattern="[A-Z]{2}" required placeholder="ES" autocomplete="off"></label>
+            <label><span>Provincia, código oficial</span><input id="printAddressState" maxlength="6" placeholder="M para Madrid" autocomplete="off"></label>
+            <label><span>Teléfono de entrega</span><input id="printAddressPhone" type="tel" maxlength="20" required autocomplete="off"></label>
+            <label><span>Moneda</span><select id="printQuoteCurrency"><option value="EUR">EUR</option><option value="USD">USD</option><option value="GBP">GBP</option><option value="CAD">CAD</option><option value="AUD">AUD</option></select></label>
+          </div>
+          <label class="check-row"><input id="printQuoteConsent" type="checkbox" required><span>Confirmo esta dirección y autorizo enviar los datos de entrega a Lulu para calcular el presupuesto. No autoriza un pedido ni un pago.</span></label>
+          <div class="panel-actions"><button id="printShippingOptionsButton" type="button">Consultar opciones de envío</button></div>
+          <label><span>Envío disponible en Lulu</span><select id="printShippingLevel" required disabled><option value="">Consulte las opciones primero</option></select></label>
+          <div class="panel-actions"><button id="printQuoteCalculateButton" type="submit" disabled>Calcular presupuesto</button></div>
+        </form>
+        <div id="printQuoteSummary" aria-live="polite">Sin presupuesto confirmado.</div>
+        <p id="printQuoteActionStatus" role="status">Una copia. Presupuesto informativo; sin pedido ni cobro.</p>
+        <button id="printPrepareOrderButton" type="button" disabled>Revisar aprobación del pedido</button>
+      </section>
+
+      <section class="admin-panel" id="printOrderPanel" hidden>
+        <div class="panel-title"><div><h2>Pedido de impresión</h2><span>Una copia. Crear el pedido y pagar son pasos separados.</span></div></div>
+        <div id="printOrderSummary" aria-live="polite">Sin pedido seleccionado.</div>
+        <form id="printOrderApprovalForm" hidden>
+          <label><span>Escriba el total exacto, con punto decimal</span><input id="printOrderAmount" inputmode="decimal" pattern="[0-9]+(\.[0-9]+)?" required autocomplete="off"></label>
+          <label class="check-row"><input id="printOrderConsent" type="checkbox" required><span>Autorizo crear una copia de estos PDF para la dirección, envío, moneda e importe del presupuesto confirmado.</span></label>
+          <label class="check-row"><input id="printManualPaymentConsent" type="checkbox" required><span>He comprobado que esta cuenta de Lulu no tiene pago automático activado. Pagaré manualmente tras revisar el pedido.</span></label>
+          <button id="printOrderApproveButton" type="submit">Guardar aprobación · todavía sin enviar</button>
+        </form>
+        <div class="panel-actions">
+          <button id="printOrderSubmitButton" type="button" disabled>Enviar pedido a Lulu</button>
+          <button id="printOrderStatusButton" type="button">Consultar registro</button>
+          <button id="printOrderSyncButton" type="button" disabled>Comprobar estado en Lulu</button>
+          <button id="printOrderReconcileButton" type="button" disabled>Conciliar envío incierto</button>
+          <a id="printPaymentPortal" target="_blank" rel="noopener noreferrer" hidden>Revisar y pagar en el portal de Lulu</a>
+        </div>
+        <p id="printOrderActionStatus" role="status">Abrir el portal no confirma el pago. La entrega se comprueba por separado.</p>
       </section>
 
       <section class="admin-panel preview-panel">
@@ -386,6 +465,7 @@
             <span id="previewMeta">Sin PDF seleccionado</span>
           </div>
         </div>
+        <a id="coverPdfLink" target="_blank" rel="noopener noreferrer" hidden>Revisar cubierta completa</a>
         <iframe id="pdfPreview" title="PDF preview"></iframe>
       </section>
 
