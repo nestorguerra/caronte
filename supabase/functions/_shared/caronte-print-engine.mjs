@@ -12,16 +12,56 @@ export const printJobFingerprint=async value=>Array.from(new Uint8Array(await cr
   new TextEncoder().encode(canonical(value)))),byte=>byte.toString(16).padStart(2,'0')).join('');
 const jsonOnly=value=>{const record={...value};delete record.bytes;return structuredClone(record);};
 const initialFor=source=>Array.from({length:5},(_,index)=>printSizesFor(source).map(size=>({key:`plan:${index}:${size}`,stage:'plan',index,size}))).flat();
+const derivedKey=key=>/^(geometry:|slice-count:|slice-geometry:|selected:|selection$)/.test(key);
+const slicedKey=key=>/^(slice-count:|slice-geometry:|selected:|selection$)/.test(key);
+const sliceIntervals=(source,index)=>{
+  const paragraphs=source.sections?.[index]?.paragraphs;
+  if(!Array.isArray(paragraphs)||!paragraphs.length)fail('print_slice_scope');
+  const intervals=[];let start=0;
+  while(start<paragraphs.length){
+    let end=start,characters=0;
+    while(end<paragraphs.length&&end-start<24){
+      if(typeof paragraphs[end]!=='string')fail('print_slice_scope');
+      if(characters+paragraphs[end].length>16000)break;
+      characters+=paragraphs[end].length;end++;
+    }
+    if(end===start)fail('print_slice_paragraph_limit');
+    intervals.push({start,end});start=end;
+  }
+  return intervals;
+};
+const sliceSteps=(source,index,size,mode)=>sliceIntervals(source,index).map(({start,end},n,all)=>({
+  key:`slice-${mode==='counts'?'count':'geometry'}:${index}:${size}:${start}`,stage:'plan',operation:'slice',
+  index,size,mode,start,end,previousKey:n?`slice-${mode==='counts'?'count':'geometry'}:${index}:${size}:${all[n-1].start}`:null
+}));
 
-function schedule(completed,source){
+function schedule(completed,source,sliced=false){
   const initial=initialFor(source),pages=resolveLiteraryContract(source.prompt_version).physicalPages;
-  for(const step of initial)if(!completed.has(step.key))return step;
+  for(const step of initial)if(!completed.has(step.key)){
+    if(sliced)for(const interval of sliceSteps(source,step.index,step.size,'counts'))if(!completed.has(interval.key))return interval;
+    // The original descriptor is frozen: derived receipts must not change the
+    // fingerprint or reset the attempts of a pre-existing started plan.
+    return step;
+  }
   if(!completed.has('compose'))for(const item of initial){
     const plan=completed.get(item.key),key=item.key.replace('plan:','geometry:');
     if(plan.plan_format!=='chapter-counts-v1'&&!completed.has(key))
       return {...item,key,operation:'compact',originalKey:item.key};
   }
-  if(!completed.has('compose'))return{key:'compose',stage:'compose'};
+  if(!completed.has('compose')){
+    if(sliced){
+      if(!completed.has('selection'))return{key:'selection',stage:'plan',operation:'selection'};
+      const size=Number(completed.get('selection').selection_size);
+      if(!printSizesFor(source).includes(size))fail('print_layout_identity');
+      for(let index=0;index<5;index++){
+        const key=`selected:${index}:${size}`;
+        if(completed.has(key))continue;
+        for(const interval of sliceSteps(source,index,size,'geometry'))if(!completed.has(interval.key))return interval;
+        return{key,stage:'plan',operation:'selected',index,size};
+      }
+    }
+    return{key:'compose',stage:'compose'};
+  }
   const manifest=completed.get('compose').output,count=manifest?.layout?.pages?.length;
   if(!Number.isSafeInteger(count)||count<pages.min||count>pages.max||count%2||manifest.proof!==false)fail('print_layout_identity');
   for(let firstPage=1;firstPage<=count;firstPage+=10){
@@ -31,11 +71,19 @@ function schedule(completed,source){
   for(const stage of ['interior','cover'])if(!completed.has(stage))return{key:stage,stage};
   return{key:'finish',stage:'finish'};
 }
-function publicJob(job,steps){
+function publicJob(job,steps,sliced=false){
   const count=steps.filter(step=>step.status==='completed').length;
   const pages=steps.find(step=>step.step_key==='compose'&&step.status==='completed')?.output?.layout?.pages?.length;
   const extra=steps.filter(step=>step.step_key.startsWith('plan:')&&step.status==='completed'&&step.plan_format!=='chapter-counts-v1').length;
-  const total=initialFor(job.source_snapshot).length+extra+1+Math.ceil((pages||resolveLiteraryContract(job.source_snapshot?.prompt_version).physicalPages.max)/10)+2+1;
+  let sliceCount=0;
+  if(sliced){
+    const byKey=new Map(steps.map(step=>[step.step_key,step]));
+    for(const plan of initialFor(job.source_snapshot))if(byKey.get(plan.key)?.status!=='completed'||
+      byKey.has(`slice-count:${plan.index}:${plan.size}:0`))sliceCount+=sliceIntervals(job.source_snapshot,plan.index).length;
+    // Partition boundaries do not depend on the selected font size.
+    sliceCount+=6+job.source_snapshot.sections.reduce((sum,_,index)=>sum+sliceIntervals(job.source_snapshot,index).length,0);
+  }
+  const total=initialFor(job.source_snapshot).length+extra+sliceCount+1+Math.ceil((pages||resolveLiteraryContract(job.source_snapshot?.prompt_version).physicalPages.max)/10)+2+1;
   return{id:job.id,status:job.status,stage:job.stage,completedSteps:count,totalSteps:total,
     progress:job.status==='ready'?100:Math.min(98,Math.floor(count/total*100)),
     errorCode:job.error_code||null,createdAt:job.created_at,updatedAt:job.updated_at};
@@ -44,6 +92,7 @@ function publicJob(job,steps){
 // Service-only coordinator. The HTTP boundary must authenticate, authorize and
 // gate activation. No recursive wake, paid model, order, payment or public URL.
 export function createPrintEngine({rest,stages,archive,settings,coverDimensions}){
+  const sliced=typeof stages.planChapterSlice==='function';
   const rpc=async(name,body)=>{
     try{return await rest(`rpc/${name}`,{method:'POST',body});}
     catch(error){
@@ -55,10 +104,31 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
   };
   const readJob=async(sessionId)=>first(await rest(`future_book_print_jobs?session_id=eq.${encode(sessionId)}&select=*&order=created_at.desc&limit=1`));
   const readSteps=async(jobId,mode='summary')=>{
-    const fields=mode==='nonPlan'?'*':'step_key,stage,status,attempt,input_hash,output_hash,error_code,plan_format:output->>format';
-    const rows=await rest(`future_book_print_steps?job_id=eq.${encode(jobId)}&select=${fields}${mode==='nonPlan'?'&stage=neq.plan':''}&order=created_at.asc,step_key.asc`);
-    if(!Array.isArray(rows))fail('print_storage_unavailable');return rows;
+    const fields=mode==='nonPlan'?'*':'step_key,stage,status,attempt,input_hash,output_hash,error_code,plan_format:output->>format,selection_size:output->>size';
+    const rows=[];
+    for(let offset=0;;offset+=500){
+      const page=await rest(`future_book_print_steps?job_id=eq.${encode(jobId)}&select=${fields}${mode==='nonPlan'?'&stage=neq.plan':''}&order=created_at.asc,step_key.asc&limit=500&offset=${offset}`);
+      if(!Array.isArray(page)||page.length>500)fail('print_storage_unavailable');
+      rows.push(...page);if(page.length<500)return rows;
+    }
   };
+  const planRecords=async(job,completed,keys)=>{
+    const output=[];
+    for(let at=0;at<keys.length;at+=5){
+      const batch=keys.slice(at,at+5),rows=await rest(`future_book_print_steps?job_id=eq.${encode(job.id)}&step_key=in.(${batch.map(encode).join(',')})&select=*`);
+      if(!Array.isArray(rows)||rows.length!==batch.length)fail('print_step_receipt_corrupt');
+      for(const key of batch){
+        const row=rows.find(item=>item.step_key===key);
+        if(row?.status!=='completed'||row.stage!=='plan'||!row.output||
+          row.output_hash!==completed.get(key)?.output_hash||await printJobFingerprint(row.output)!==row.output_hash||
+          row.output.sourceFingerprint!==job.source_sha256)fail('print_step_receipt_corrupt');
+        output.push(row.output);
+      }
+    }
+    return output;
+  };
+  const sliceChain=(job,completed,index,size,mode)=>planRecords(job,completed,
+    sliceSteps(job.source_snapshot,index,size,mode).map(item=>item.key));
   const chapterPlans=async(job,completed)=>{
     const originals=initialFor(job.source_snapshot).map(step=>step.key);
     const keys=originals.map(key=>completed.get(key).plan_format==='chapter-counts-v1'?key:key.replace('plan:','geometry:')),plans=[];
@@ -98,7 +168,7 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
     if(!uuid.test(sessionId))fail('print_job_scope');
     const job=await readJob(sessionId);if(!job)return{job:null,pdf:null};
     const steps=await readSteps(job.id),pdf=job.status==='ready'?await readPdf(job):null;
-    return{job:publicJob(job,steps),pdf};
+    return{job:publicJob(job,steps,sliced),pdf};
   }
   async function enqueue(sessionId,row){
     if(!uuid.test(sessionId)||!uuid.test(row?.id)||row.session_id!==sessionId)fail('print_job_scope');
@@ -158,12 +228,13 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
           completed.set(record.step_key,record);
         }
       }
-      const next=schedule(completed,job.source_snapshot),previous=steps.find(record=>record.step_key===next.key);
+      if(sliced&&['finishChapterSlices','selectLayoutSize'].some(name=>typeof stages[name]!=='function'))fail('print_slice_scope');
+      const next=schedule(completed,job.source_snapshot,sliced),previous=steps.find(record=>record.step_key===next.key);
       const inputHash=await printJobFingerprint({jobId:job.id,pdfId:job.pdf_id,version:job.version,
         source:job.source_sha256,identity:job.input_hash,createdAt:new Date(job.created_at).toISOString(),stage:next,
-        // Geometry is a derived cache. Keep pre-existing stage fingerprints and
-        // frozen render identities unchanged when adapting legacy receipts.
-        receipts:[...completed].filter(([key])=>!key.startsWith('geometry:'))
+        // All pre-existing stage descriptors, including legacy geometry caches,
+        // retain their old fingerprints. Only new sliced steps bind derivatives.
+        receipts:[...completed].filter(([key])=>slicedKey(next.key)||!derivedKey(key))
           .sort(([a],[b])=>a.localeCompare(b)).map(([key,value])=>[key,value.output_hash])});
       if(previous?.input_hash&&previous.input_hash!==inputHash)fail('print_step_input_changed');
       step={step_key:next.key,stage:next.stage,status:'started',attempt:previous?.attempt||0,input_hash:inputHash,
@@ -227,9 +298,26 @@ export function createPrintEngine({rest,stages,archive,settings,coverDimensions}
         const compact=await compactPrintChapterPlan(original.output);
         const record={...compact,originalPlanKey:next.originalKey,originalPlanHash:original.output_hash};delete record.sha256;
         output={...record,sha256:await printJobFingerprint(record)};
-      }else if(next.stage==='plan')output=await stages.planChapter(source,next.index,{size:next.size,compact:true});
-      else if(next.stage==='compose')output=await stages.composeLayout(source,await chapterPlans(job,completed),
-        {createdAt:new Date(job.created_at).toISOString(),proof:false});
+      }else if(next.operation==='slice'){
+        const previousSlice=next.previousKey?(await planRecords(job,completed,[next.previousKey]))[0]:null;
+        output=await stages.planChapterSlice(source,next.index,{size:next.size,mode:next.mode,previous:previousSlice,
+          maxParagraphs:24,maxCharacters:16000});
+        if(output.startParagraph!==next.start||output.endParagraph!==next.end)fail('print_slice_chain');
+      }else if(next.operation==='selection')output=await stages.selectLayoutSize(source,await chapterPlans(job,completed));
+      else if(next.operation==='selected')output=await stages.finishChapterSlices(source,next.index,
+        await sliceChain(job,completed,next.index,next.size,'geometry'),{size:next.size,compact:false});
+      else if(next.stage==='plan')output=sliced?await stages.finishChapterSlices(source,next.index,
+        await sliceChain(job,completed,next.index,next.size,'counts'),{size:next.size,compact:true}):
+        await stages.planChapter(source,next.index,{size:next.size,compact:true});
+      else if(next.stage==='compose'){
+        const options={createdAt:new Date(job.created_at).toISOString(),proof:false};
+        if(sliced){
+          const selection=(await planRecords(job,completed,['selection']))[0];
+          options.geometryPlans=await planRecords(job,completed,Array.from({length:5},(_,index)=>`selected:${index}:${selection.size}`));
+          output=await stages.composeLayout(source,await chapterPlans(job,completed),options);
+          if(output.layout?.size!==selection.size||output.layout.pages.length!==selection.pageCount)fail('print_layout_identity');
+        }else output=await stages.composeLayout(source,await chapterPlans(job,completed),options);
+      }
       else if(next.stage==='part')output=await stages.renderInteriorPart(source,manifest,next);
       else if(next.stage==='interior'){
         const parts=[];

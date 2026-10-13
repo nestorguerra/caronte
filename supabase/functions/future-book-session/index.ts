@@ -3506,7 +3506,8 @@ function printEngine() {
   // Loading fonts is deferred until a worker renders. Status/enqueue never render.
   const stage = (name: string) => async (...args: unknown[]) => (await loadPrintStages())[name](...args);
   return createPrintEngine({ rest: printDatabaseRest,
-    stages: Object.fromEntries(['planChapter','composeLayout','renderInteriorPart','mergeInterior','renderCover'].map(name => [name,stage(name)])),
+    stages: Object.fromEntries(['planChapter','planChapterSlice','finishChapterSlices','selectLayoutSize',
+      'composeLayout','renderInteriorPart','mergeInterior','renderCover'].map(name => [name,stage(name)])),
     archive: createPrintStageArchive({ url: supabaseUrl, serviceKey: serviceRoleKey, fetch }),
     settings: async () => {
       const credentials = await luluCredentials();

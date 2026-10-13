@@ -61,9 +61,11 @@ export function printDatabase(){
    let selected=filter?.startsWith('eq.')?steps.filter(s=>s.step_key===filter.slice(3)):
     filter?.startsWith('in.(')?steps.filter(s=>filter.slice(4,-1).split(',').includes(s.step_key)):steps;
    if(params.get('stage')==='neq.plan')selected=selected.filter(s=>s.stage!=='plan');
+   const offset=Number(params.get('offset')||0),limit=Number(params.get('limit')||selected.length);
+   selected=selected.slice(offset,offset+limit);
    const fields=params.get('select');
    const result=copy(fields&&fields!=='*'?selected.map(s=>Object.fromEntries(fields.split(',').map(k=>
-    k==='plan_format:output->>format'?['plan_format',s.output?.format]:[k,s[k]]))):selected);
+    k.includes(':output->>')?[k.split(':')[0],s.output?.[k.split('->>')[1]]]:[k,s[k]]))):selected);
    if(alterIntentRead&&result.some(s=>s.output?.path)){
     alterIntentRead=false;result.at(-1).output_hash='0'.repeat(64);
    }
@@ -114,6 +116,24 @@ test('enqueue reserves one stable job/PDF/version and hides the manuscript from 
  assert.equal(app.db.job.source_snapshot.sections[4].paragraphs[29],printManuscript().sections[4].paragraphs[29]);
  assert.equal(JSON.stringify(first).includes('INICIO1P1'),false);assert.equal(first.pdf,null);
 });
+test('progress reads every durable summary beyond the hosted one-thousand-row response cap',async()=>{
+ const app=fixture();await app.engine().enqueue(sid,manuscript());
+ for(let index=0;index<1200;index++)app.db.steps.push({step_key:`slice-count:0:12:${index*24}`,
+  stage:'plan',status:'completed',attempt:1,input_hash:'a'.repeat(64),output_hash:'b'.repeat(64)});
+ const rest=async(path,options)=>{
+  const rows=await app.db.rest(path,options);
+  if(path.startsWith('future_book_print_steps?')){
+   const query=new URLSearchParams(path.split('?')[1]);
+   if(!query.has('limit'))return rows.slice(0,1000);
+   assert.ok(Number(query.get('limit'))<=500);assert.notEqual(query.get('select'),'*');
+  }
+  return rows;
+ };
+ const status=await app.engine({rest}).status(sid);
+ assert.equal(status.job.completedSteps,1200);assert.equal(status.pdf,null);
+ assert.ok(app.db.calls.some(path=>path.includes('&offset=1000')));
+ assert.equal(JSON.stringify(status).includes('INICIO1P1'),false);
+});
 test('a new +30 job finishes 220-page parts and binds the version on its PDF without changing old jobs',async()=>{
   const app=fixture({pages:220}),row={...manuscript(),manuscript:printManuscriptThirty()};
   await app.engine().enqueue(sid,row);
@@ -158,6 +178,24 @@ test('legacy full plan receipts are compacted one per durable claim and remain i
   assert.deepEqual(app.db.steps.slice(0,25),originals);
   for(let i=0;i<55&&app.db.job.status!=='ready';i++)await app.engine().advance();
   assert.equal(app.db.job.status,'ready');assert.deepEqual(app.db.steps.slice(0,25),originals);
+});
+test('an already-started legacy geometry cache retains its old input fingerprint after other caches complete',async()=>{
+ const app=fixture(),base=app.stages.planChapter;
+ app.stages.planChapter=async(source,index,options)=>{
+  const value=await base(source,index,options);delete value.format;delete value.sha256;
+  value.candidates=value.candidates.map(({pageCount,...candidate})=>({...candidate,pages:Array(pageCount).fill({})}));
+  return{...value,sha256:sha(value)};
+ };
+ await app.engine().enqueue(sid,manuscript());for(let index=0;index<26;index++)await app.engine().advance();
+ const frozen=structuredClone(app.db.steps),next={key:'geometry:0:12.5',stage:'plan',index:0,size:12.5,
+  operation:'compact',originalKey:'plan:0:12.5'};
+ const inputHash=sha({jobId:jid,pdfId:pid,version:1,source:app.db.job.source_sha256,identity:app.db.job.input_hash,
+  createdAt:app.db.job.created_at,stage:next,receipts:frozen.filter(row=>!row.step_key.startsWith('geometry:'))
+   .sort((a,b)=>a.step_key.localeCompare(b.step_key)).map(row=>[row.step_key,row.output_hash])});
+ app.db.steps.push({step_key:next.key,stage:'plan',status:'started',attempt:1,input_hash:inputHash,output:null,output_hash:null});
+ const result=await app.engine().advance();assert.equal(result.status,'queued',result.errorCode);
+ assert.equal(app.db.steps.at(-1).input_hash,inputHash);assert.equal(app.db.steps.at(-1).attempt,2);
+ assert.deepEqual(app.db.steps.slice(0,frozen.length),frozen);
 });
 test('changed source, degraded manuscript or absent editorial gate cannot start another active print',async()=>{
  const app=fixture();await app.engine().enqueue(sid,manuscript());
@@ -274,7 +312,10 @@ for(const modern of [false,true])test(`real ${modern?'+30 / 216-224':'legacy +40
    ...prototypeCoverDimensions(count),source:'lulu-api',environment:job.lulu_environment,
    podPackageId:job.pod_package_id,pageCount:count})});
  await engine().enqueue(sid,row);
- for(let i=0;i<(modern?106:26);i++)await engine().advance();
+ for(let i=0;i<2000&&!db.steps.some(step=>step.step_key==='compose'&&step.status==='completed');i++){
+  const result=await engine().advance();assert.equal(result.status,'queued',result.errorCode);
+ }
+ assert.equal(db.steps.find(step=>step.step_key==='compose')?.status,'completed');
  db.losePartCompletion();await assert.rejects(engine().advance(),/print_storage_unavailable/);
  assert.equal(uploads,1);db.tick(141);await engine().advance();assert.equal(uploads,1);
  for(let i=0;i<26&&db.job.status!=='ready';i++){
@@ -288,9 +329,11 @@ for(const modern of [false,true])test(`real ${modern?'+30 / 216-224':'legacy +40
  if(modern){
   assert.ok(pageCount>=216&&pageCount<=224,pageCount);
   assert.equal(pdf.metadata.literary_contract_version,'caronte-literary-v3');
-  assert.equal(db.steps.filter(step=>step.stage==='plan').length,105);
+  assert.equal(db.steps.filter(step=>step.step_key.startsWith('plan:')).length,105);
  }else assert.equal(pageCount,194);
  assert.equal(uploads,Math.ceil(pageCount/10)+2);
+ assert.equal(db.steps.filter(step=>step.step_key.startsWith('selected:')&&step.status==='completed').length,5);
+ assert.ok(db.steps.some(step=>step.step_key.startsWith('slice-count:')&&step.status==='completed'));
  assert.equal((await PDFDocument.load(cover)).getPageCount(),1);
  assert.ok(coverText.join(' ').includes(`dentro de ${modern?'treinta':'cuarenta'} años`));
  if(!modern)assert.equal(sha(JSON.stringify(manifest.layout)),'7f3e02233706bf3f1d67b8232c22d8f2bd8ec77ba60f190ab347bb4ab57c391c');

@@ -253,6 +253,10 @@ test('the dedicated print-worker header authorizes exactly one real planning sta
  const result=await app.dispatch({action:'advancePrint',jobId:jid},null,null,{'x-caronte-print-worker-secret':worker});
  assert.deepEqual(result,{status:200,data:{ok:true,status:'queued',jobId:jid}});
  assert.equal(app.steps.length,1);assert.equal(app.steps[0].status,'completed');assert.equal(app.steps[0].stage,'plan');
+ assert.equal(app.steps[0].step_key,'slice-count:0:12:0');
+ assert.equal(app.steps[0].output.format,'chapter-slice-v1');
+ assert.ok(app.steps[0].output.endParagraph<=24);
+ assert.equal(app.steps[0].output.maxCharacters,16000);
  assert.equal(app.stageLoads(),1);assert.equal(app.pdfs.length,0);
  assert.equal(app.requests.filter(r=>r.url.pathname.endsWith('caronte_claim_print_job')).length,1);
  assert.equal(app.requests.some(r=>r.url.pathname.startsWith('/functions/')),false);
