@@ -110,6 +110,64 @@ function planBook(source, size, leading, widths, chapterOffset = 0) {
     margins: {inside: INNER, outside: OUTER, bottom: BOTTOM}, mirroredMargins: true};
 }
 
+// Resume only at a paragraph boundary. Keep the established line breaking,
+// widow/orphan decisions and floating-point subtraction order unchanged.
+function planChapterInterval(chapter, chapterIndex, size, mode, start, end, previous, widths) {
+  const pages=[];let page,y;
+  const newPage=kind=>{
+    page={number:page? page.number+1:5,kind,lines:[]};pages.push(page);y=H-72;
+  };
+  const add=(line,kind,font,fontSize)=>{
+    if(line.width>TEXT_WIDTH+0.01)fail('print_line_overflow');
+    if(mode==='geometry')page.lines.push({...line,x:page.number%2?INNER:OUTER,y,kind,font,size:fontSize});
+  };
+  if(previous){
+    page={number:previous.state.pageNumber,kind:previous.state.pageNumber===5?'chapter':'body',lines:[]};
+    pages.push(page);y=previous.state.y;
+  }else{
+    newPage('chapter');y=H-104;
+    const label=`CAPÍTULO ${chapterIndex+1}`;
+    add({text:label,width:widths.regular(label,10)},'heading','regular',10);y-=40;
+    const titles=wrap(chapter.title,TEXT_WIDTH,25,widths.bold);
+    if(titles.length>4)fail('print_heading_too_long');
+    for(const line of titles){add(line,'heading','bold',25);y-=31;}
+    y-=26;
+  }
+  const leading=size*1.4;
+  for(const paragraph of chapter.paragraphs.slice(start,end)){
+    const lines=wrap(paragraph,TEXT_WIDTH,size,widths.regular);let index=0;
+    while(index<lines.length){
+      const capacity=Math.floor((y-BOTTOM)/leading)+1,remaining=lines.length-index;
+      if(capacity<Math.min(2,remaining)){newPage('body');continue;}
+      let take=Math.min(capacity,remaining);
+      if(remaining>take&&remaining-take===1&&take>2)take--;
+      for(let n=0;n<take;n++){add(lines[index++],'body','regular',size);y-=leading;}
+      if(index<lines.length)newPage('body');
+    }
+    y-=leading*0.35;
+  }
+  if(end===chapter.paragraphs.length&&page.number%2)newPage('binding_blank');
+  return {state:{pageNumber:page.number,y},...(mode==='geometry'?{pages}:{})};
+}
+
+function layoutFromChapterMatrix(source,size,matrix) {
+  const pages=[{number:1,kind:'title',lines:[]},{number:2,kind:'edition',lines:[]},
+    {number:3,kind:'contents',lines:[]},{number:4,kind:'recto_blank',lines:[]}];
+  const chapterStarts=[];let paragraphCount=0;
+  for(let index=0;index<5;index++){
+    const candidate=matrix.get(`${index}:${size}`);
+    if(!Array.isArray(candidate?.pages)||!candidate.pages.length||candidate.pages.length%2||
+      candidate.leading!==size*1.4||candidate.paragraphCount!==source.sections[index].paragraphs.length)fail('print_chapter_plan_corrupt');
+    chapterStarts.push({title:source.sections[index].title,page:pages.length+1});paragraphCount+=candidate.paragraphCount;
+    for(const [offset,page] of candidate.pages.entries()){
+      if(page.number!==offset+5)fail('print_chapter_plan_corrupt');
+      pages.push({...page,number:pages.length+1,kind:page.kind==='binding_blank'&&index<4?'recto_blank':page.kind});
+    }
+  }
+  return {pages,chapterStarts,paragraphCount,textWidth:TEXT_WIDTH,size,leading:size*1.4,
+    margins:{inside:INNER,outside:OUTER,bottom:BOTTOM},mirroredMargins:true};
+}
+
 function chooseLayout(source, fonts) {
   const pages=resolveLiteraryContract(source.prompt_version).physicalPages;
   const widths = Object.fromEntries(Object.entries(fonts).map(([key, font]) => [key, measure(font)]));
@@ -277,6 +335,89 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
     supported(embedded.italic, [source.subtitle]);
     return {doc, embedded};
   };
+  const sliceScope=(current,index,size)=>{
+    if(!Number.isSafeInteger(index)||index<0||index>4||!printSizesFor(current.source).includes(size))fail('print_slice_scope');
+  };
+  const sliceState=(state,size)=>state&&Number.isSafeInteger(state.pageNumber)&&state.pageNumber>=5&&state.pageNumber<10000&&
+    Number.isFinite(state.y)&&state.y>=BOTTOM-size*1.4*1.35-0.000001&&state.y<=H-72;
+  const validateSlice=async(current,index,size,slice,mode)=>{
+    if(!slice||slice.template!==PRINT_TEMPLATE||slice.stagesVersion!==STAGES_VERSION||
+      slice.sourceFingerprint!==current.sourceFingerprint||slice.fontFingerprint!==current.fontFingerprint||
+      slice.chapterIndex!==index||slice.size!==size||slice.mode!==mode)fail('print_slice_identity');
+    if(slice.sha256!==await jsonHash(without(slice,'sha256')))fail('print_slice_corrupt');
+    const chapter=current.source.sections[index],total=chapter.paragraphs.length;
+    if(slice.format!=='chapter-slice-v1'||!['counts','geometry'].includes(mode)||
+      !Number.isSafeInteger(slice.startParagraph)||!Number.isSafeInteger(slice.endParagraph)||
+      slice.startParagraph<0||slice.endParagraph<=slice.startParagraph||slice.endParagraph>total||slice.totalParagraphs!==total||
+      slice.done!==(slice.endParagraph===total)||!Number.isSafeInteger(slice.maxParagraphs)||slice.maxParagraphs<1||slice.maxParagraphs>24||
+      !Number.isSafeInteger(slice.maxCharacters)||slice.maxCharacters<1||slice.maxCharacters>16000||
+      slice.endParagraph-slice.startParagraph>slice.maxParagraphs||
+      chapter.paragraphs.slice(slice.startParagraph,slice.endParagraph).reduce((sum,text)=>sum+text.length,0)>slice.maxCharacters||
+      !sliceState(slice.state,size)||slice.done&&slice.state.pageNumber%2||
+      (slice.startParagraph===0?(slice.previousSha256!==null||slice.startState!==null):
+        (!/^[a-f0-9]{64}$/.test(slice.previousSha256||'')||!sliceState(slice.startState,size)))||
+      slice.startState&&slice.state.pageNumber<slice.startState.pageNumber)fail('print_slice_corrupt');
+    if(mode==='counts'){
+      if(slice.pages!==undefined)fail('print_slice_corrupt');
+      return;
+    }
+    const first=slice.startState?.pageNumber??5;
+    if(!Array.isArray(slice.pages)||slice.pages.length!==slice.state.pageNumber-first+1)fail('print_slice_corrupt');
+    for(const [offset,page] of slice.pages.entries()){
+      const number=first+offset;
+      if(page.number!==number||!Array.isArray(page.lines)||
+        page.kind!==(number===5?'chapter':slice.done&&offset===slice.pages.length-1&&page.kind==='binding_blank'?'binding_blank':'body')||
+        page.kind==='binding_blank'&&page.lines.length)fail('print_slice_corrupt');
+      for(const line of page.lines){
+        if(typeof line.text!=='string'||!normal(line.text)||!['body','heading'].includes(line.kind)||
+          line.x!==(number%2?INNER:OUTER)||!Number.isFinite(line.y)||line.y<BOTTOM||line.y>H-72||
+          !Number.isFinite(line.width)||line.width<0||line.width>TEXT_WIDTH+0.01||
+          (line.kind==='body'?(line.font!=='regular'||line.size!==size):
+            (slice.startParagraph!==0||number!==5||!['regular','bold'].includes(line.font)||
+              line.size!==(line.font==='regular'?10:25))))fail('print_slice_corrupt');
+      }
+    }
+    const body=slice.pages.flatMap(page=>page.lines.filter(line=>line.kind==='body').map(line=>line.text)).join(' ');
+    if(body!==normal(chapter.paragraphs.slice(slice.startParagraph,slice.endParagraph).join(' ')))fail('print_slice_corrupt');
+    const headings=slice.pages.flatMap(page=>page.lines.filter(line=>line.kind==='heading'));
+    if(slice.startParagraph===0&&(headings[0]?.text!==`CAPÍTULO ${index+1}`||
+      headings[0]?.font!=='regular'||headings.slice(1).some(line=>line.font!=='bold')||
+      headings.slice(1).map(line=>line.text).join(' ')!==normal(chapter.title)))fail('print_slice_corrupt');
+  };
+  const chapterMatrix=async(current,input)=>{
+    const chapters=clone(input),sizes=printSizesFor(current.source),expected=5*sizes.length;
+    if(!Array.isArray(chapters)||chapters.length!==expected||chapters.some(chapter=>
+      !Number.isSafeInteger(chapter?.chapterIndex)||chapter.chapterIndex<0||chapter.chapterIndex>4))fail('print_chapter_plans_required');
+    chapters.sort((a,b)=>a.chapterIndex-b.chapterIndex);
+    const matrix=new Map();
+    for(const chapter of chapters){
+      if(chapter.template!==PRINT_TEMPLATE||chapter.stagesVersion!==STAGES_VERSION||
+        chapter.sourceFingerprint!==current.sourceFingerprint||chapter.fontFingerprint!==current.fontFingerprint)fail('print_chapter_plan_identity');
+      if(chapter.sha256!==await jsonHash(without(chapter,'sha256'))||!Array.isArray(chapter.candidates)||chapter.candidates.length!==1||
+        !sizes.includes(chapter.candidates[0]?.size)||
+        chapter.format!==undefined&&chapter.format!=='chapter-counts-v1')fail('print_chapter_plan_corrupt');
+      const candidate=chapter.candidates[0],key=`${chapter.chapterIndex}:${candidate.size}`;
+      if(matrix.has(key))fail('print_chapter_plans_required');matrix.set(key,candidate);
+    }
+    if(matrix.size!==expected)fail('print_chapter_plans_required');
+    return{chapters,sizes,matrix,compact:chapters.some(chapter=>chapter.format==='chapter-counts-v1')};
+  };
+  const selectCounts=(current,matrix,sizes)=>{
+    const counts=sizes.map(size=>{
+      let count=4;
+      for(let chapterIndex=0;chapterIndex<5;chapterIndex++){
+        const candidate=matrix.get(`${chapterIndex}:${size}`),pages=candidate.pageCount??candidate.pages?.length;
+        if(!Number.isSafeInteger(pages)||pages<2||pages%2||candidate.leading!==size*1.4||
+          candidate.paragraphCount!==current.source.sections[chapterIndex].paragraphs.length)fail('print_chapter_plan_corrupt');
+        count+=pages;
+      }
+      return{size,count};
+    });
+    const policy=resolveLiteraryContract(current.source.prompt_version).physicalPages,target=policy.target??(policy.min+policy.max)/2;
+    const chosen=counts.filter(item=>item.count>=policy.min&&item.count<=policy.max)
+      .sort((a,b)=>Math.abs(a.count-target)-Math.abs(b.count-target))[0];
+    if(!chosen)fail('print_pagination_needs_revision');return chosen;
+  };
   const validateManifest = async (manuscript, input) => {
     const current = await identity(manuscript), manifest = clone(input);
     const pages=resolveLiteraryContract(current.source.prompt_version).physicalPages;
@@ -326,6 +467,69 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
     return doc;
   };
   return Object.freeze({
+    async selectLayoutSize(manuscript,input){
+      const current=await identity(manuscript),{chapters,sizes,matrix}=await chapterMatrix(current,input);
+      const chosen=selectCounts(current,matrix,sizes);
+      const plans=chapters.map(chapter=>[`${chapter.chapterIndex}:${chapter.candidates[0].size}`,chapter.sha256])
+        .sort(([a],[b])=>a.localeCompare(b));
+      const record={template:PRINT_TEMPLATE,stagesVersion:STAGES_VERSION,sourceFingerprint:current.sourceFingerprint,
+        fontFingerprint:current.fontFingerprint,format:'layout-selection-v1',size:chosen.size,pageCount:chosen.count,
+        plansHash:await jsonHash(plans)};
+      return{...record,sha256:await jsonHash(record)};
+    },
+    async planChapterSlice(manuscript,chapterIndex,options={}){
+      const current=await identity(manuscript),size=options.size,mode=options.mode;
+      const maxParagraphs=options.maxParagraphs??24,maxCharacters=options.maxCharacters??16000;
+      sliceScope(current,chapterIndex,size);
+      if(!['counts','geometry'].includes(mode)||!Number.isSafeInteger(maxParagraphs)||maxParagraphs<1||maxParagraphs>24||
+        !Number.isSafeInteger(maxCharacters)||maxCharacters<1||maxCharacters>16000)fail('print_slice_scope');
+      const previous=clone(options.previous??null),chapter=current.source.sections[chapterIndex];
+      if(previous){await validateSlice(current,chapterIndex,size,previous,mode);if(previous.done)fail('print_slice_chain');}
+      const start=previous?.endParagraph??0;let end=start,characters=0;
+      while(end<chapter.paragraphs.length&&end-start<maxParagraphs&&characters+chapter.paragraphs[end].length<=maxCharacters){
+        characters+=chapter.paragraphs[end].length;end++;
+      }
+      if(end===start)fail('print_slice_paragraph_limit');
+      const {embedded}=await document(current.source);
+      const widths=Object.fromEntries(Object.entries(embedded).map(([name,font])=>[name,measure(font)]));
+      const interval=planChapterInterval(chapter,chapterIndex,size,mode,start,end,previous,widths);
+      const record={template:PRINT_TEMPLATE,stagesVersion:STAGES_VERSION,sourceFingerprint:current.sourceFingerprint,
+        fontFingerprint:current.fontFingerprint,format:'chapter-slice-v1',chapterIndex,size,mode,
+        startParagraph:start,endParagraph:end,totalParagraphs:chapter.paragraphs.length,
+        previousSha256:previous?.sha256??null,startState:previous?.state??null,maxParagraphs,maxCharacters,
+        done:end===chapter.paragraphs.length,...interval};
+      const receipt={...record,sha256:await jsonHash(record)};
+      await validateSlice(current,chapterIndex,size,receipt,mode);return receipt;
+    },
+    async finishChapterSlices(manuscript,chapterIndex,input,options={}){
+      const current=await identity(manuscript),size=options.size;sliceScope(current,chapterIndex,size);
+      const slices=clone(input),total=current.source.sections[chapterIndex].paragraphs.length;
+      if(!Array.isArray(slices)||!slices.length||slices.length>total)fail('print_slice_chain');
+      const mode=slices[0]?.mode;
+      if(mode==='counts'&&options.compact!==true)fail('print_slice_geometry_required');
+      let previous=null;const pages=[];
+      for(const slice of slices){
+        await validateSlice(current,chapterIndex,size,slice,mode);
+        if(previous?.done||slice.startParagraph!==(previous?.endParagraph??0)||
+          slice.previousSha256!==(previous?.sha256??null)||json(slice.startState)!==json(previous?.state??null))fail('print_slice_chain');
+        if(mode==='geometry')for(const page of slice.pages){
+          const last=pages.at(-1);
+          if(last?.number===page.number){
+            if(last.kind!==page.kind)fail('print_slice_chain');last.lines.push(...page.lines);
+          }else{
+            if(page.number!==(last?.number??4)+1)fail('print_slice_chain');pages.push(clone(page));
+          }
+        }
+        previous=slice;
+      }
+      if(!previous.done||previous.endParagraph!==total)fail('print_slice_chain');
+      const candidate={size,leading:size*1.4,...(mode==='geometry'?{pages}:{}),paragraphCount:total,
+        ...(mode==='counts'?{pageCount:previous.state.pageNumber-4}:{})};
+      const record={template:PRINT_TEMPLATE,stagesVersion:STAGES_VERSION,sourceFingerprint:current.sourceFingerprint,
+        fontFingerprint:current.fontFingerprint,chapterIndex,candidates:[candidate],...(mode==='counts'?{format:'chapter-counts-v1'}:{})};
+      const plan={...record,sha256:await jsonHash(record)};
+      return options.compact===true?compactPrintChapterPlan(plan):plan;
+    },
     async planChapter(manuscript, chapterIndex, options = {}) {
       if (!Number.isSafeInteger(chapterIndex) || chapterIndex < 0 || chapterIndex > 4 ||
           !PRINT_SIZES.includes(options.size)) fail('print_chapter_plan_scope');
@@ -342,45 +546,30 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
       return options.compact===true?compactPrintChapterPlan(complete):complete;
     },
     async composeLayout(manuscript, input, options = {}) {
-      const current = await identity(manuscript), chapters = clone(input);
-      const sizes=printSizesFor(current.source),expected=5*sizes.length;
-      if (!Array.isArray(chapters) || chapters.length !== expected ||
-          chapters.some(chapter => !Number.isSafeInteger(chapter?.chapterIndex) || chapter.chapterIndex < 0 || chapter.chapterIndex > 4)) fail('print_chapter_plans_required');
-      chapters.sort((a, b) => a.chapterIndex - b.chapterIndex);
-      for (const chapter of chapters) {
-        if (chapter.template !== PRINT_TEMPLATE || chapter.stagesVersion !== STAGES_VERSION || chapter.sourceFingerprint !== current.sourceFingerprint ||
-            chapter.fontFingerprint !== current.fontFingerprint) fail('print_chapter_plan_identity');
-        if (chapter.sha256 !== await jsonHash(without(chapter, 'sha256')) || !Array.isArray(chapter.candidates) ||
-            chapter.candidates.length !== 1 ||
-            chapter.candidates.some(candidate => !sizes.includes(candidate.size))) fail('print_chapter_plan_corrupt');
-      }
-      const matrix = new Map();
-      for (const chapter of chapters) for (const candidate of chapter.candidates) {
-        const key = `${chapter.chapterIndex}:${candidate.size}`;
-        if (matrix.has(key)) fail('print_chapter_plans_required');
-        matrix.set(key, candidate);
-      }
-      if (matrix.size !== expected) fail('print_chapter_plans_required');
-      const compact=chapters.some(chapter=>chapter.format==='chapter-counts-v1');
-      if(chapters.some(chapter=>chapter.format!==undefined&&chapter.format!=='chapter-counts-v1'))fail('print_chapter_plan_corrupt');
+      const current=await identity(manuscript),{sizes,matrix,compact}=await chapterMatrix(current,input);
       if(compact){
-        const counts=sizes.map(size=>{
-          let count=4;
-          for(let chapterIndex=0;chapterIndex<5;chapterIndex++){
-            const candidate=matrix.get(`${chapterIndex}:${size}`),pages=candidate.pageCount??candidate.pages?.length;
-            if(!Number.isSafeInteger(pages)||pages<2||pages%2||candidate.leading!==size*1.4||
-              candidate.paragraphCount!==current.source.sections[chapterIndex].paragraphs.length)fail('print_chapter_plan_corrupt');
-            count+=pages;
+        const chosen=selectCounts(current,matrix,sizes);
+        let layout;
+        if(options.geometryPlans!==undefined){
+          const geometry=clone(options.geometryPlans),selected=new Map();
+          if(!Array.isArray(geometry)||geometry.length!==5)fail('print_geometry_plans_required');
+          for(const chapter of geometry){
+            if(!Number.isSafeInteger(chapter?.chapterIndex)||chapter.chapterIndex<0||chapter.chapterIndex>4||
+              selected.has(`${chapter.chapterIndex}:${chosen.size}`))fail('print_geometry_plans_required');
+            if(chapter.template!==PRINT_TEMPLATE||chapter.stagesVersion!==STAGES_VERSION||
+              chapter.sourceFingerprint!==current.sourceFingerprint||chapter.fontFingerprint!==current.fontFingerprint)fail('print_chapter_plan_identity');
+            if(chapter.format!==undefined||chapter.sha256!==await jsonHash(without(chapter,'sha256'))||
+              chapter.candidates?.length!==1||chapter.candidates[0].size!==chosen.size||
+              chapter.candidates[0].pages?.length!==(matrix.get(`${chapter.chapterIndex}:${chosen.size}`).pageCount??
+                matrix.get(`${chapter.chapterIndex}:${chosen.size}`).pages?.length))fail('print_chapter_plan_corrupt');
+            selected.set(`${chapter.chapterIndex}:${chosen.size}`,chapter.candidates[0]);
           }
-          return {size,count};
-        });
-        const policy=resolveLiteraryContract(current.source.prompt_version).physicalPages,target=policy.target??(policy.min+policy.max)/2;
-        const chosen=counts.filter(item=>item.count>=policy.min&&item.count<=policy.max)
-          .sort((a,b)=>Math.abs(a.count-target)-Math.abs(b.count-target))[0];
-        if(!chosen)fail('print_pagination_needs_revision');
-        const {embedded}=await document(current.source);
-        const widths=Object.fromEntries(Object.entries(embedded).map(([name,font])=>[name,measure(font)]));
-        const layout=planBook(current.source,chosen.size,chosen.size*1.4,widths);
+          layout=layoutFromChapterMatrix(current.source,chosen.size,selected);
+        }else{
+          const {embedded}=await document(current.source);
+          const widths=Object.fromEntries(Object.entries(embedded).map(([name,font])=>[name,measure(font)]));
+          layout=planBook(current.source,chosen.size,chosen.size*1.4,widths);
+        }
         if(layout.pages.length!==chosen.count)fail('print_chapter_plan_corrupt');
         for(let index=0;index<5;index++){
           const end=index===4?layout.pages.length+1:layout.chapterStarts[index+1].page;
@@ -395,25 +584,7 @@ export function createPrintStages({PDFDocument, fontkit, fonts}) {
         manifest.manifestHash=await jsonHash(manifest);
         await validateManifest(current.source,manifest);return manifest;
       }
-      const candidates = sizes.map(size => {
-        const pages = [{number: 1, kind: 'title', lines: []}, {number: 2, kind: 'edition', lines: []},
-          {number: 3, kind: 'contents', lines: []}, {number: 4, kind: 'recto_blank', lines: []}];
-        const chapterStarts = []; let paragraphCount = 0;
-        for (let chapterIndex = 0; chapterIndex < 5; chapterIndex++) {
-          const candidate = matrix.get(`${chapterIndex}:${size}`);
-          if (!Array.isArray(candidate.pages) || !candidate.pages.length || candidate.pages.length % 2 ||
-              candidate.leading !== size * 1.4 || candidate.paragraphCount !== current.source.sections[chapterIndex].paragraphs.length) fail('print_chapter_plan_corrupt');
-          chapterStarts.push({title: current.source.sections[chapterIndex].title, page: pages.length + 1});
-          paragraphCount += candidate.paragraphCount;
-          for (const [index, page] of candidate.pages.entries()) {
-            if (page.number !== index + 5) fail('print_chapter_plan_corrupt');
-            pages.push({...page, number: pages.length + 1,
-              kind: page.kind === 'binding_blank' && chapterIndex < 4 ? 'recto_blank' : page.kind});
-          }
-        }
-        return {pages, chapterStarts, paragraphCount, textWidth: TEXT_WIDTH, size, leading: size * 1.4,
-          margins: {inside: INNER, outside: OUTER, bottom: BOTTOM}, mirroredMargins: true};
-      }).filter(layout => {
+      const candidates = sizes.map(size => layoutFromChapterMatrix(current.source,size,matrix)).filter(layout => {
         const pages=resolveLiteraryContract(current.source.prompt_version).physicalPages;
         return layout.pages.length>=pages.min&&layout.pages.length<=pages.max;
       });
